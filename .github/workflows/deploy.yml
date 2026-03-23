@@ -1,0 +1,94 @@
+name: Deploy
+
+on:
+  workflow_call:
+    inputs:
+      deploy_path:
+        type: string
+        required: true
+        description: "Absolute path on server"
+      compose_file:
+        type: string
+        default: "docker-compose.ci.yml"
+      health_check_url:
+        type: string
+        default: ""
+      run_migrations:
+        type: boolean
+        default: true
+      migration_command:
+        type: string
+        default: "python manage.py migrate --noinput"
+      ssh_user:
+        type: string
+        required: true
+      ssh_host:
+        type: string
+        required: true
+    secrets:
+      SSH_PRIVATE_KEY:
+        required: true
+      SSH_KNOWN_HOSTS:
+        required: true
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Setup SSH
+        run: |
+          mkdir -p ~/.ssh
+          echo "${{ secrets.SSH_PRIVATE_KEY }}" > ~/.ssh/id_ed25519
+          chmod 600 ~/.ssh/id_ed25519
+          echo "${{ secrets.SSH_KNOWN_HOSTS }}" >> ~/.ssh/known_hosts
+          chmod 644 ~/.ssh/known_hosts
+
+      - name: Deploy to server
+        env:
+          SSH_TARGET: ${{ inputs.ssh_user }}@${{ inputs.ssh_host }}
+          DEPLOY_PATH: ${{ inputs.deploy_path }}
+          COMPOSE_FILE: ${{ inputs.compose_file }}
+          RUN_MIGRATIONS: ${{ inputs.run_migrations }}
+          MIGRATION_CMD: ${{ inputs.migration_command }}
+        run: |
+          ssh $SSH_TARGET << ENDSSH
+            set -e
+            cd $DEPLOY_PATH
+
+            echo "Pulling latest images..."
+            docker compose -f $COMPOSE_FILE pull
+
+            echo "Restarting containers..."
+            docker compose -f $COMPOSE_FILE up -d --force-recreate
+
+            echo "Waiting for services to start..."
+            sleep 10
+
+            echo "Collecting static files into volume..."
+            docker compose -f $COMPOSE_FILE exec -T backend python manage.py collectstatic --noinput
+
+            if [ "$RUN_MIGRATIONS" = "true" ]; then
+              echo "Running migrations..."
+              docker compose -f $COMPOSE_FILE exec -T backend $MIGRATION_CMD
+            fi
+
+            echo "Cleaning up old images..."
+            docker image prune -f
+
+            echo "Deployment complete!"
+            docker compose -f $COMPOSE_FILE ps
+          ENDSSH
+
+      - name: Health check
+        if: inputs.health_check_url != ''
+        run: |
+          echo "Running health check..."
+          sleep 5
+          HTTP_STATUS=$(curl -s -o /dev/null -w "%{http_code}" --max-time 30 ${{ inputs.health_check_url }} || echo "000")
+          if [ "$HTTP_STATUS" = "200" ] || [ "$HTTP_STATUS" = "302" ]; then
+            echo "Health check passed (HTTP $HTTP_STATUS)"
+          else
+            echo "Health check warning (HTTP $HTTP_STATUS)"
+            exit 1
+          fi

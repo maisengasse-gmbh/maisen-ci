@@ -1,0 +1,96 @@
+name: Django Lint & Test
+
+on:
+  workflow_call:
+    inputs:
+      python_version:
+        type: string
+        default: "3.12"
+      working_directory:
+        type: string
+        default: "."
+      ruff_args:
+        type: string
+        default: "check ."
+      pytest_args:
+        type: string
+        default: "--ds settings.test -x"
+      postgres_version:
+        type: string
+        default: "16"
+      database_url:
+        type: string
+        default: "postgres://postgres:postgres@localhost:5432/test_db"
+      cache_url:
+        type: string
+        default: "redis://localhost:6379/0"
+
+jobs:
+  lint-test:
+    runs-on: ubuntu-latest
+
+    services:
+      postgres:
+        image: postgres:${{ inputs.postgres_version }}
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: test_db
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+
+      redis:
+        image: redis:5.0-alpine
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python ${{ inputs.python_version }}
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ inputs.python_version }}
+
+      - name: Cache pip
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/pip
+          key: pip-${{ inputs.python_version }}-${{ hashFiles(format('{0}/requirements.txt', inputs.working_directory)) }}
+          restore-keys: |
+            pip-${{ inputs.python_version }}-
+
+      - name: Install dependencies
+        working-directory: ${{ inputs.working_directory }}
+        run: |
+          pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: Ruff lint
+        working-directory: ${{ inputs.working_directory }}
+        run: ruff ${{ inputs.ruff_args }}
+
+      - name: Run tests
+        working-directory: ${{ inputs.working_directory }}
+        env:
+          DATABASE_CONNECTION_URL: ${{ inputs.database_url }}
+          CACHE_URL: ${{ inputs.cache_url }}
+          SECRET_KEY: test-secret-key-for-ci
+          PROJECT_NAME: intersportbudget
+          PROJECT_VERBOSE_NAME: "Intersport Budget"
+          ALLOWED_HOSTS: "*"
+          CORS_ORIGIN_WHITELIST: "http://localhost"
+          CSRF_TRUSTED_ORIGINS: "http://localhost"
+          DEBUG: "False"
+        run: pytest ${{ inputs.pytest_args }}
