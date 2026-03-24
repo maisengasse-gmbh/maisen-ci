@@ -85,6 +85,9 @@ jobs:
           pip install --upgrade pip
           pip install -r requirements.txt
 
+      - name: Install Ruff
+        run: pip install ruff
+
       - name: Ruff lint
         working-directory: ${{ inputs.working_directory }}
         run: ruff ${{ inputs.ruff_args }}
