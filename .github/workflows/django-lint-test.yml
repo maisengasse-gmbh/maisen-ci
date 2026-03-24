@@ -104,4 +104,6 @@ jobs:
           CORS_ORIGIN_WHITELIST: "http://localhost"
           CSRF_TRUSTED_ORIGINS: "http://localhost"
           DEBUG: "False"
+          JWT_ALGORITHM: "HS256"
+          JWT_SECRET_KEY: test-secret-key-for-ci
         run: pytest ${{ inputs.pytest_args }}
