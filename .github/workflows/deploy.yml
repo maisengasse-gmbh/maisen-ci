@@ -26,6 +26,14 @@ on:
       ssh_host:
         type: string
         required: true
+      create_tag:
+        type: boolean
+        default: true
+        description: "Create a git tag after successful deploy"
+      tag_prefix:
+        type: string
+        default: "deploy"
+        description: "Tag prefix (e.g. deploy → deploy/2026-03-24-a1b2c3d)"
     secrets:
       SSH_PRIVATE_KEY:
         required: true
@@ -35,8 +43,16 @@ on:
 jobs:
   deploy:
     runs-on: ubuntu-latest
+    permissions:
+      contents: write
 
     steps:
+      - name: Checkout
+        if: inputs.create_tag
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
       - name: Setup SSH
         run: |
           mkdir -p ~/.ssh
@@ -93,3 +109,12 @@ jobs:
             echo "Health check warning (HTTP $HTTP_STATUS)"
             exit 1
           fi
+
+      - name: Create deploy tag
+        if: inputs.create_tag
+        run: |
+          SHORT_SHA=$(echo "${{ github.sha }}" | cut -c1-7)
+          TAG_NAME="${{ inputs.tag_prefix }}/$(date -u +%Y-%m-%d)-${SHORT_SHA}"
+          git tag "$TAG_NAME"
+          git push origin "$TAG_NAME"
+          echo "Tagged: $TAG_NAME"

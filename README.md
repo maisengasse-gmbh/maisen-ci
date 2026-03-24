@@ -108,6 +108,8 @@ jobs:
 | `migration_command` | `python manage.py migrate --noinput` | Migration command |
 | `ssh_user` | (required) | SSH username |
 | `ssh_host` | (required) | SSH hostname |
+| `create_tag` | `true` | Create a git tag after successful deploy |
+| `tag_prefix` | `deploy` | Tag prefix (e.g. deploy/2026-03-24-a1b2c3d) |
 
 **Secrets:** `SSH_PRIVATE_KEY`, `SSH_KNOWN_HOSTS`
 
