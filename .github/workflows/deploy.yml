@@ -85,7 +85,7 @@ jobs:
           done
 
       - name: Write env file to server
-        if: secrets.ENV_FILE != ''
+        if: inputs.env_file_path != ''
         env:
           SSH_TARGET: ${{ inputs.ssh_user }}@${{ inputs.ssh_host }}
           DEPLOY_PATH: ${{ inputs.deploy_path }}
