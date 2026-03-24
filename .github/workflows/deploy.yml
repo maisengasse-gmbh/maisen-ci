@@ -73,6 +73,9 @@ jobs:
             set -e
             cd $DEPLOY_PATH
 
+            echo "Pulling latest code..."
+            git pull
+
             echo "Pulling latest images..."
             docker compose $COMPOSE_FILES pull
 
