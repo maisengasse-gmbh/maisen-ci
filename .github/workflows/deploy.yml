@@ -10,7 +10,11 @@ on:
       compose_files:
         type: string
         default: "-f docker-compose.base.yml -f docker-compose.prod.yml"
-        description: "Docker Compose file flags (e.g. -f base.yml -f prod.yml)"
+        description: "Docker Compose file flags relative to deploy_path (e.g. -f docker/base.yml -f docker/prod.yml)"
+      compose_source_files:
+        type: string
+        default: ""
+        description: "Space-separated compose files in repo to SCP to server (e.g. path/to/docker-compose.base.yml path/to/docker-compose.prod.yml)"
       health_check_url:
         type: string
         default: ""
@@ -48,7 +52,6 @@ jobs:
 
     steps:
       - name: Checkout
-        if: inputs.create_tag
         uses: actions/checkout@v4
         with:
           fetch-depth: 0
@@ -61,6 +64,20 @@ jobs:
           echo "${{ secrets.SSH_KNOWN_HOSTS }}" >> ~/.ssh/known_hosts
           chmod 644 ~/.ssh/known_hosts
 
+      - name: Copy compose files to server
+        if: inputs.compose_source_files != ''
+        env:
+          SSH_TARGET: ${{ inputs.ssh_user }}@${{ inputs.ssh_host }}
+          DEPLOY_PATH: ${{ inputs.deploy_path }}
+        run: |
+          ssh $SSH_TARGET "mkdir -p $DEPLOY_PATH"
+          for file in ${{ inputs.compose_source_files }}; do
+            dir=$(dirname "$file")
+            ssh $SSH_TARGET "mkdir -p $DEPLOY_PATH/$dir"
+            scp "$file" "$SSH_TARGET:$DEPLOY_PATH/$file"
+            echo "Copied $file"
+          done
+
       - name: Deploy to server
         env:
           SSH_TARGET: ${{ inputs.ssh_user }}@${{ inputs.ssh_host }}
@@ -72,9 +89,6 @@ jobs:
           ssh $SSH_TARGET << ENDSSH
             set -e
             cd $DEPLOY_PATH
-
-            echo "Pulling latest code..."
-            git pull
 
             echo "Pulling latest images..."
             docker compose $COMPOSE_FILES pull
