@@ -24,6 +24,14 @@ on:
       cache_url:
         type: string
         default: "redis://localhost:6379/0"
+      project_name:
+        type: string
+        default: ""
+        description: "Django PROJECT_NAME env var"
+      project_verbose_name:
+        type: string
+        default: ""
+        description: "Django PROJECT_VERBOSE_NAME env var"
 
 jobs:
   lint-test:
@@ -87,8 +95,8 @@ jobs:
           DATABASE_CONNECTION_URL: ${{ inputs.database_url }}
           CACHE_URL: ${{ inputs.cache_url }}
           SECRET_KEY: test-secret-key-for-ci
-          PROJECT_NAME: intersportbudget
-          PROJECT_VERBOSE_NAME: "Intersport Budget"
+          PROJECT_NAME: ${{ inputs.project_name }}
+          PROJECT_VERBOSE_NAME: ${{ inputs.project_verbose_name }}
           ALLOWED_HOSTS: "*"
           CORS_ORIGIN_WHITELIST: "http://localhost"
           CSRF_TRUSTED_ORIGINS: "http://localhost"

@@ -76,6 +76,8 @@ jobs:
 | `postgres_version` | `16` | PostgreSQL version |
 | `database_url` | `postgres://postgres:postgres@localhost:5432/test_db` | Database URL |
 | `cache_url` | `redis://localhost:6379/0` | Cache URL |
+| `project_name` | `""` | Django PROJECT_NAME env var |
+| `project_verbose_name` | `""` | Django PROJECT_VERBOSE_NAME env var |
 
 ### vue-build.yml
 
@@ -100,7 +102,7 @@ jobs:
 | Input | Default | Description |
 |-------|---------|-------------|
 | `deploy_path` | (required) | Absolute path on server |
-| `compose_file` | `docker-compose.ci.yml` | Compose file name |
+| `compose_files` | `-f docker-compose.base.yml -f docker-compose.prod.yml` | Docker Compose file flags |
 | `health_check_url` | `""` | URL for health check |
 | `run_migrations` | `true` | Run Django migrations |
 | `migration_command` | `python manage.py migrate --noinput` | Migration command |
@@ -114,7 +116,7 @@ jobs:
 1. Docker + Docker Compose v2 installed
 2. Traefik running with external `web` network
 3. One-time `docker login ghcr.io` with a fine-grained PAT (`read:packages` scope)
-4. Deploy directory with `docker-compose.ci.yml` and `env/` files
+4. Deploy directory with `docker-compose.base.yml`, `docker-compose.prod.yml` and `env/` files
 
 ## Required GitHub Secrets (per consumer repo)
 
