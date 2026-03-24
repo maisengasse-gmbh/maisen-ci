@@ -38,11 +38,17 @@ on:
         type: string
         default: "deploy"
         description: "Tag prefix (e.g. deploy → deploy/2026-03-24-a1b2c3d)"
+      env_file_path:
+        type: string
+        default: ".env"
+        description: "Path on server (relative to deploy_path) where ENV_FILE secret is written"
     secrets:
       SSH_PRIVATE_KEY:
         required: true
       SSH_KNOWN_HOSTS:
         required: true
+      ENV_FILE:
+        required: false
 
 jobs:
   deploy:
@@ -77,6 +83,17 @@ jobs:
             scp "$file" "$SSH_TARGET:$DEPLOY_PATH/$file"
             echo "Copied $file"
           done
+
+      - name: Write env file to server
+        if: secrets.ENV_FILE != ''
+        env:
+          SSH_TARGET: ${{ inputs.ssh_user }}@${{ inputs.ssh_host }}
+          DEPLOY_PATH: ${{ inputs.deploy_path }}
+          ENV_FILE_PATH: ${{ inputs.env_file_path }}
+        run: |
+          ssh $SSH_TARGET "mkdir -p $DEPLOY_PATH/$(dirname $ENV_FILE_PATH)"
+          echo "${{ secrets.ENV_FILE }}" | ssh $SSH_TARGET "cat > $DEPLOY_PATH/$ENV_FILE_PATH"
+          echo "Wrote env file to $DEPLOY_PATH/$ENV_FILE_PATH"
 
       - name: Deploy to server
         env:
