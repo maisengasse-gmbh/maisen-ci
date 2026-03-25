@@ -146,29 +146,45 @@ jobs:
             echo "Waiting for services to start..."
             sleep 10
 
-            if [ "$BACKUP_ENABLED" = "true" ] && [ -n "$BACKUP_DB_NAME" ]; then
-              echo "Creating pre-deploy backup..."
-              mkdir -p $BACKUP_PATH
-              BACKUP_FILE=$BACKUP_PATH/${BACKUP_DB_NAME}_pre-deploy_$(date +%Y%m%d_%H%M%S).dump
-              docker compose $COMPOSE_FILES exec -T $BACKUP_CONTAINER pg_dump -U $BACKUP_DB_USER -Fc $BACKUP_DB_NAME > $BACKUP_FILE
-              echo "Backup created: $BACKUP_FILE ($(du -h $BACKUP_FILE | cut -f1))"
-              find $BACKUP_PATH -name "${BACKUP_DB_NAME}_pre-deploy_*" -mtime +$BACKUP_RETENTION_DAYS -delete
-            fi
-
-            if [ "$RUN_MIGRATIONS" = "true" ]; then
-              echo "Running migrations..."
-              docker compose $COMPOSE_FILES exec -T backend $MIGRATION_CMD
-            fi
-
-            echo "Collecting static files into volume..."
-            docker compose $COMPOSE_FILES exec -T backend python manage.py collectstatic --noinput
-
             echo "Cleaning up old images..."
             docker image prune -f
 
-            echo "Deployment complete!"
+            echo "Containers started!"
             docker compose $COMPOSE_FILES ps
           ENDSSH
+
+      - name: Pre-deploy backup
+        if: inputs.backup_enabled && inputs.backup_db_name != ''
+        env:
+          SSH_TARGET: ${{ inputs.ssh_user }}@${{ inputs.ssh_host }}
+          DEPLOY_PATH: ${{ inputs.deploy_path }}
+          COMPOSE_FILES: ${{ inputs.compose_files }}
+        run: |
+          TIMESTAMP=$(date -u +%Y%m%d_%H%M%S)
+          BACKUP_FILE="${{ inputs.backup_path }}/${{ inputs.backup_db_name }}_pre-deploy_${TIMESTAMP}.dump"
+          ssh $SSH_TARGET "mkdir -p ${{ inputs.backup_path }}"
+          ssh $SSH_TARGET "cd $DEPLOY_PATH && docker compose $COMPOSE_FILES exec -T ${{ inputs.backup_container }} pg_dump -U ${{ inputs.backup_db_user }} -Fc ${{ inputs.backup_db_name }}" > /tmp/backup.dump
+          scp /tmp/backup.dump "$SSH_TARGET:$BACKUP_FILE"
+          ssh $SSH_TARGET "find ${{ inputs.backup_path }} -name '${{ inputs.backup_db_name }}_pre-deploy_*' -mtime +${{ inputs.backup_retention_days }} -delete"
+          echo "Backup created: $BACKUP_FILE"
+
+      - name: Run migrations
+        if: inputs.run_migrations
+        env:
+          SSH_TARGET: ${{ inputs.ssh_user }}@${{ inputs.ssh_host }}
+          DEPLOY_PATH: ${{ inputs.deploy_path }}
+          COMPOSE_FILES: ${{ inputs.compose_files }}
+          MIGRATION_CMD: ${{ inputs.migration_command }}
+        run: |
+          ssh $SSH_TARGET "cd $DEPLOY_PATH && docker compose $COMPOSE_FILES exec -T backend $MIGRATION_CMD"
+
+      - name: Collect static files
+        env:
+          SSH_TARGET: ${{ inputs.ssh_user }}@${{ inputs.ssh_host }}
+          DEPLOY_PATH: ${{ inputs.deploy_path }}
+          COMPOSE_FILES: ${{ inputs.compose_files }}
+        run: |
+          ssh $SSH_TARGET "cd $DEPLOY_PATH && docker compose $COMPOSE_FILES exec -T backend python manage.py collectstatic --noinput"
 
       - name: Health check
         if: inputs.health_check_url != ''
