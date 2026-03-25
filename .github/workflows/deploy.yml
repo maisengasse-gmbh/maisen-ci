@@ -42,6 +42,30 @@ on:
         type: string
         default: ".env"
         description: "Path on server (relative to deploy_path) where ENV_FILE secret is written"
+      backup_enabled:
+        type: boolean
+        default: true
+        description: "Create a DB backup before running migrations"
+      backup_container:
+        type: string
+        default: "db"
+        description: "Docker Compose service name for the database"
+      backup_db_user:
+        type: string
+        default: "postgres"
+        description: "Database user for pg_dump"
+      backup_db_name:
+        type: string
+        default: ""
+        description: "Database name for pg_dump (empty = skip backup)"
+      backup_path:
+        type: string
+        default: "/tmp/backups"
+        description: "Server path for backup files"
+      backup_retention_days:
+        type: string
+        default: "30"
+        description: "Delete backups older than N days"
     secrets:
       SSH_PRIVATE_KEY:
         required: true
@@ -102,6 +126,12 @@ jobs:
           COMPOSE_FILES: ${{ inputs.compose_files }}
           RUN_MIGRATIONS: ${{ inputs.run_migrations }}
           MIGRATION_CMD: ${{ inputs.migration_command }}
+          BACKUP_ENABLED: ${{ inputs.backup_enabled }}
+          BACKUP_CONTAINER: ${{ inputs.backup_container }}
+          BACKUP_DB_USER: ${{ inputs.backup_db_user }}
+          BACKUP_DB_NAME: ${{ inputs.backup_db_name }}
+          BACKUP_PATH: ${{ inputs.backup_path }}
+          BACKUP_RETENTION_DAYS: ${{ inputs.backup_retention_days }}
         run: |
           ssh $SSH_TARGET << ENDSSH
             set -e
@@ -115,6 +145,15 @@ jobs:
 
             echo "Waiting for services to start..."
             sleep 10
+
+            if [ "$BACKUP_ENABLED" = "true" ] && [ -n "$BACKUP_DB_NAME" ]; then
+              echo "Creating pre-deploy backup..."
+              mkdir -p $BACKUP_PATH
+              BACKUP_FILE=$BACKUP_PATH/${BACKUP_DB_NAME}_pre-deploy_$(date +%Y%m%d_%H%M%S).dump
+              docker compose $COMPOSE_FILES exec -T $BACKUP_CONTAINER pg_dump -U $BACKUP_DB_USER -Fc $BACKUP_DB_NAME > $BACKUP_FILE
+              echo "Backup created: $BACKUP_FILE ($(du -h $BACKUP_FILE | cut -f1))"
+              find $BACKUP_PATH -name "${BACKUP_DB_NAME}_pre-deploy_*" -mtime +$BACKUP_RETENTION_DAYS -delete
+            fi
 
             if [ "$RUN_MIGRATIONS" = "true" ]; then
               echo "Running migrations..."
