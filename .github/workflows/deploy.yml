@@ -114,9 +114,12 @@ jobs:
           SSH_TARGET: ${{ inputs.ssh_user }}@${{ inputs.ssh_host }}
           DEPLOY_PATH: ${{ inputs.deploy_path }}
           ENV_FILE_PATH: ${{ inputs.env_file_path }}
+          ENV_FILE_CONTENT: ${{ secrets.ENV_FILE }}
         run: |
+          printf '%s' "$ENV_FILE_CONTENT" > /tmp/.env.deploy
           ssh $SSH_TARGET "mkdir -p $DEPLOY_PATH/$(dirname $ENV_FILE_PATH)"
-          echo "${{ secrets.ENV_FILE }}" | ssh $SSH_TARGET "cat > $DEPLOY_PATH/$ENV_FILE_PATH"
+          scp /tmp/.env.deploy "$SSH_TARGET:$DEPLOY_PATH/$ENV_FILE_PATH"
+          rm -f /tmp/.env.deploy
           echo "Wrote env file to $DEPLOY_PATH/$ENV_FILE_PATH"
 
       - name: Deploy to server
