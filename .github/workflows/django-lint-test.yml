@@ -18,6 +18,18 @@ on:
       postgres_version:
         type: string
         default: "16"
+      postgres_image:
+        type: string
+        default: ""
+        description: "Custom PostgreSQL image (e.g. postgis/postgis:16-3.4). Overrides postgres_version."
+      cache_image:
+        type: string
+        default: "redis:5.0-alpine"
+        description: "Cache service image (redis or valkey)"
+      cache_health_cmd:
+        type: string
+        default: "redis-cli ping"
+        description: "Health check command for cache service"
       database_url:
         type: string
         default: "postgres://postgres:postgres@localhost:5432/test_db"
@@ -32,6 +44,26 @@ on:
         type: string
         default: ""
         description: "Django PROJECT_VERBOSE_NAME env var"
+      system_packages:
+        type: string
+        default: ""
+        description: "Additional apt packages to install (space-separated)"
+      pip_install_command:
+        type: string
+        default: ""
+        description: "Custom pip install command. If empty, uses 'pip install -r requirements.txt'"
+      pre_test_script:
+        type: string
+        default: ""
+        description: "Shell script to run before tests (e.g. start extra services, init data)"
+      env_file:
+        type: string
+        default: ""
+        description: "Path to .env file to load into GITHUB_ENV before tests"
+      extra_env:
+        type: string
+        default: ""
+        description: "Extra environment variables (KEY=VALUE, one per line)"
 
 jobs:
   lint-test:
@@ -39,7 +71,7 @@ jobs:
 
     services:
       postgres:
-        image: postgres:${{ inputs.postgres_version }}
+        image: ${{ inputs.postgres_image || format('postgres:{0}', inputs.postgres_version) }}
         env:
           POSTGRES_USER: postgres
           POSTGRES_PASSWORD: postgres
@@ -52,12 +84,12 @@ jobs:
           --health-timeout 5s
           --health-retries 5
 
-      redis:
-        image: redis:5.0-alpine
+      cache:
+        image: ${{ inputs.cache_image }}
         ports:
           - 6379:6379
         options: >-
-          --health-cmd "redis-cli ping"
+          --health-cmd "${{ inputs.cache_health_cmd }}"
           --health-interval 10s
           --health-timeout 5s
           --health-retries 5
@@ -65,6 +97,12 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+
+      - name: Install system packages
+        if: inputs.system_packages != ''
+        run: |
+          sudo apt-get update -q
+          sudo apt-get install -y --no-install-recommends ${{ inputs.system_packages }}
 
       - name: Set up Python ${{ inputs.python_version }}
         uses: actions/setup-python@v5
@@ -83,7 +121,7 @@ jobs:
         working-directory: ${{ inputs.working_directory }}
         run: |
           pip install --upgrade pip
-          pip install -r requirements.txt
+          ${{ inputs.pip_install_command || 'pip install -r requirements.txt' }}
 
       - name: Install Ruff
         run: pip install ruff
@@ -91,6 +129,19 @@ jobs:
       - name: Ruff lint
         working-directory: ${{ inputs.working_directory }}
         run: ruff ${{ inputs.ruff_args }}
+
+      - name: Load env file
+        if: inputs.env_file != ''
+        working-directory: ${{ inputs.working_directory }}
+        run: cat "${{ inputs.env_file }}" >> $GITHUB_ENV
+
+      - name: Load extra env
+        if: inputs.extra_env != ''
+        run: echo "${{ inputs.extra_env }}" >> $GITHUB_ENV
+
+      - name: Pre-test script
+        if: inputs.pre_test_script != ''
+        run: ${{ inputs.pre_test_script }}
 
       - name: Run tests
         working-directory: ${{ inputs.working_directory }}
