@@ -122,40 +122,6 @@ jobs:
           rm -f /tmp/.env.deploy
           echo "Wrote env file to $DEPLOY_PATH/$ENV_FILE_PATH"
 
-      - name: Deploy to server
-        env:
-          SSH_TARGET: ${{ inputs.ssh_user }}@${{ inputs.ssh_host }}
-          DEPLOY_PATH: ${{ inputs.deploy_path }}
-          COMPOSE_FILES: ${{ inputs.compose_files }}
-          RUN_MIGRATIONS: ${{ inputs.run_migrations }}
-          MIGRATION_CMD: ${{ inputs.migration_command }}
-          BACKUP_ENABLED: ${{ inputs.backup_enabled }}
-          BACKUP_CONTAINER: ${{ inputs.backup_container }}
-          BACKUP_DB_USER: ${{ inputs.backup_db_user }}
-          BACKUP_DB_NAME: ${{ inputs.backup_db_name }}
-          BACKUP_PATH: ${{ inputs.backup_path }}
-          BACKUP_RETENTION_DAYS: ${{ inputs.backup_retention_days }}
-        run: |
-          ssh $SSH_TARGET << ENDSSH
-            set -e
-            cd $DEPLOY_PATH
-
-            echo "Pulling latest images..."
-            docker compose $COMPOSE_FILES pull
-
-            echo "Starting containers..."
-            docker compose $COMPOSE_FILES up -d
-
-            echo "Waiting for services to start..."
-            sleep 10
-
-            echo "Cleaning up old images..."
-            docker image prune -f
-
-            echo "Containers started!"
-            docker compose $COMPOSE_FILES ps
-          ENDSSH
-
       - name: Pre-deploy backup
         if: inputs.backup_enabled && inputs.backup_db_name != ''
         env:
@@ -171,6 +137,52 @@ jobs:
           ssh $SSH_TARGET "find ${{ inputs.backup_path }} -name '${{ inputs.backup_db_name }}_pre-deploy_*' -mtime +${{ inputs.backup_retention_days }} -delete"
           echo "Backup created: $BACKUP_FILE"
 
+      - name: Deploy to server
+        env:
+          SSH_TARGET: ${{ inputs.ssh_user }}@${{ inputs.ssh_host }}
+          DEPLOY_PATH: ${{ inputs.deploy_path }}
+          COMPOSE_FILES: ${{ inputs.compose_files }}
+        run: |
+          ssh $SSH_TARGET << ENDSSH
+            set -e
+            cd $DEPLOY_PATH
+
+            echo "Pulling latest images..."
+            docker compose $COMPOSE_FILES pull
+
+            echo "Starting containers..."
+            docker compose $COMPOSE_FILES up -d
+
+            echo "Cleaning up old images..."
+            docker image prune -f
+
+            echo "Waiting for backend container to be ready..."
+            for i in \$(seq 1 30); do
+              STATUS=\$(docker compose $COMPOSE_FILES ps --format '{{.State}}' backend 2>/dev/null || echo "unknown")
+              if [ "\$STATUS" = "running" ]; then
+                echo "Backend container is running (attempt \$i/30)"
+                break
+              fi
+              if [ "\$STATUS" = "restarting" ] || [ "\$STATUS" = "exited" ] || [ "\$STATUS" = "dead" ]; then
+                echo "Backend container failed with status: \$STATUS"
+                echo "=== Container Logs ==="
+                docker compose $COMPOSE_FILES logs --tail=50 backend
+                exit 1
+              fi
+              echo "Waiting for backend... (attempt \$i/30, status: \$STATUS)"
+              sleep 2
+            done
+
+            if [ "\$STATUS" != "running" ]; then
+              echo "Backend container did not become ready in time (status: \$STATUS)"
+              echo "=== Container Logs ==="
+              docker compose $COMPOSE_FILES logs --tail=50 backend
+              exit 1
+            fi
+
+            docker compose $COMPOSE_FILES ps
+          ENDSSH
+
       - name: Run migrations
         if: inputs.run_migrations
         env:
@@ -179,7 +191,11 @@ jobs:
           COMPOSE_FILES: ${{ inputs.compose_files }}
           MIGRATION_CMD: ${{ inputs.migration_command }}
         run: |
-          ssh $SSH_TARGET "cd $DEPLOY_PATH && docker compose $COMPOSE_FILES exec -T backend $MIGRATION_CMD"
+          ssh $SSH_TARGET "cd $DEPLOY_PATH && docker compose $COMPOSE_FILES exec -T backend $MIGRATION_CMD" || {
+            echo "=== Migration failed - Backend Logs ==="
+            ssh $SSH_TARGET "cd $DEPLOY_PATH && docker compose $COMPOSE_FILES logs --tail=50 backend"
+            exit 1
+          }
 
       - name: Collect static files
         env:
