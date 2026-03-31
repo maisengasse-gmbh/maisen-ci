@@ -1,0 +1,55 @@
+name: Flutter Build
+
+on:
+  workflow_call:
+    inputs:
+      flutter_version:
+        type: string
+        default: "stable"
+        description: "Flutter version or channel (stable, beta, or specific version)"
+      working_directory:
+        type: string
+        default: "."
+      analyze_args:
+        type: string
+        default: ""
+        description: "Additional arguments for flutter analyze"
+      test_args:
+        type: string
+        default: ""
+        description: "Additional arguments for flutter test"
+      build_platform:
+        type: string
+        default: ""
+        description: "Platform to build. Empty = skip build. (apk, appbundle, ios, web)"
+
+jobs:
+  flutter-build:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          flutter-version: ${{ inputs.flutter_version }}
+          channel: ${{ contains(inputs.flutter_version, '.') && '' || inputs.flutter_version }}
+
+      - name: Install dependencies
+        working-directory: ${{ inputs.working_directory }}
+        run: flutter pub get
+
+      - name: Analyze
+        working-directory: ${{ inputs.working_directory }}
+        run: flutter analyze ${{ inputs.analyze_args }}
+
+      - name: Run tests
+        working-directory: ${{ inputs.working_directory }}
+        run: flutter test ${{ inputs.test_args }}
+
+      - name: Build
+        if: inputs.build_platform != ''
+        working-directory: ${{ inputs.working_directory }}
+        run: flutter build ${{ inputs.build_platform }}
