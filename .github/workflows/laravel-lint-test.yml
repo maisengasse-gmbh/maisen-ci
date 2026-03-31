@@ -1,0 +1,148 @@
+name: Laravel Lint & Test
+
+on:
+  workflow_call:
+    inputs:
+      php_version:
+        type: string
+        default: "8.3"
+      working_directory:
+        type: string
+        default: "."
+      composer_args:
+        type: string
+        default: "--no-interaction --prefer-dist"
+        description: "Arguments for composer install"
+      lint_command:
+        type: string
+        default: "vendor/bin/pint --test"
+        description: "Lint command (default: Laravel Pint)"
+      test_command:
+        type: string
+        default: "vendor/bin/phpunit"
+        description: "Test command"
+      database_image:
+        type: string
+        default: "mysql:8.0"
+        description: "Database service image (mysql or postgres)"
+      database_port:
+        type: string
+        default: "3306"
+        description: "Database port (3306 for MySQL, 5432 for PostgreSQL)"
+      cache_image:
+        type: string
+        default: "valkey/valkey:8-alpine"
+        description: "Cache service image"
+      cache_health_cmd:
+        type: string
+        default: "valkey-cli ping"
+        description: "Health check command for cache service"
+      system_packages:
+        type: string
+        default: ""
+        description: "Additional apt packages to install (space-separated)"
+      env_file:
+        type: string
+        default: ""
+        description: "Path to .env file to load into GITHUB_ENV before tests"
+      extra_env:
+        type: string
+        default: ""
+        description: "Extra environment variables (KEY=VALUE, one per line)"
+
+jobs:
+  lint-test:
+    runs-on: ubuntu-latest
+
+    services:
+      database:
+        image: ${{ inputs.database_image }}
+        env:
+          MYSQL_ROOT_PASSWORD: password
+          MYSQL_DATABASE: test_db
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: test_db
+        ports:
+          - ${{ inputs.database_port }}:${{ inputs.database_port }}
+        options: >-
+          --health-cmd "mysqladmin ping -h localhost 2>/dev/null || pg_isready -U postgres 2>/dev/null"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+
+      cache:
+        image: ${{ inputs.cache_image }}
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd "${{ inputs.cache_health_cmd }}"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install system packages
+        if: inputs.system_packages != ''
+        run: |
+          sudo apt-get update -q
+          sudo apt-get install -y --no-install-recommends ${{ inputs.system_packages }}
+
+      - name: Set up PHP ${{ inputs.php_version }}
+        uses: shivammathur/setup-php@v2
+        with:
+          php-version: ${{ inputs.php_version }}
+          extensions: mbstring, xml, ctype, json, pdo, pdo_mysql, pdo_pgsql, tokenizer, bcmath, redis
+          coverage: none
+
+      - name: Cache Composer
+        uses: actions/cache@v4
+        with:
+          path: ~/.composer/cache
+          key: composer-${{ inputs.php_version }}-${{ hashFiles(format('{0}/composer.lock', inputs.working_directory)) }}
+          restore-keys: |
+            composer-${{ inputs.php_version }}-
+
+      - name: Install dependencies
+        working-directory: ${{ inputs.working_directory }}
+        run: composer install ${{ inputs.composer_args }}
+
+      - name: Lint
+        working-directory: ${{ inputs.working_directory }}
+        run: ${{ inputs.lint_command }}
+
+      - name: Load env file
+        if: inputs.env_file != ''
+        working-directory: ${{ inputs.working_directory }}
+        run: cat "${{ inputs.env_file }}" >> $GITHUB_ENV
+
+      - name: Load extra env
+        if: inputs.extra_env != ''
+        run: echo "${{ inputs.extra_env }}" >> $GITHUB_ENV
+
+      - name: Prepare Laravel
+        working-directory: ${{ inputs.working_directory }}
+        env:
+          APP_KEY: base64:dGVzdC1rZXktZm9yLWNpLXBpcGVsaW5l
+          APP_ENV: testing
+        run: |
+          cp .env.example .env 2>/dev/null || true
+          php artisan key:generate --force 2>/dev/null || true
+
+      - name: Run tests
+        working-directory: ${{ inputs.working_directory }}
+        env:
+          APP_KEY: base64:dGVzdC1rZXktZm9yLWNpLXBpcGVsaW5l
+          APP_ENV: testing
+          DB_HOST: 127.0.0.1
+          DB_PORT: ${{ inputs.database_port }}
+          DB_DATABASE: test_db
+          DB_USERNAME: root
+          DB_PASSWORD: password
+          CACHE_DRIVER: redis
+          REDIS_HOST: 127.0.0.1
+          REDIS_PORT: 6379
+        run: ${{ inputs.test_command }}
