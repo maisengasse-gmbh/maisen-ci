@@ -244,6 +244,74 @@ uses: maisengasse-gmbh/maisen-ci/.github/workflows/deploy.yml@v2
 
 Breaking changes only happen on major version bumps. Consumer projects can revert to `@v1` with a one-line change if `@v2` causes issues.
 
+## 1Password Environments
+
+### Overview
+
+`deploy.yml` supports optional 1Password Environments for secrets management. When `op_environment_id` is provided, the workflow uses the 1Password CLI to inject secrets into the `.env` file on the server — replacing the static `ENV_FILE` secret approach.
+
+### Setup
+
+1. **Install the `op` CLI** (for local development):
+   ```bash
+   brew install 1password-cli
+   ```
+
+2. **Create Environments in the 1Password Desktop App** — one per deployment stage per project (e.g. `my-project-dev`, `my-project-prod`).
+
+3. **Create a Service Account** in 1Password with read access to the production Environment(s).
+
+4. **Configure GitHub** for the consumer repo:
+   - Repository variable: `OP_ENVIRONMENT_ID` — the ID of the 1Password Environment for production
+   - Repository secret: `OP_SERVICE_ACCOUNT_TOKEN` — the service account token
+
+### Local Development
+
+Add a `.env.tpl` file to the repo with `op://` references:
+
+```dotenv
+DATABASE_URL=op://my-project-prod/database/url
+SECRET_KEY=op://my-project-prod/django/secret-key
+```
+
+Run `make up` — the Makefile should auto-generate `.env` via:
+
+```bash
+op inject -i .env.tpl -o .env
+```
+
+### CI/CD
+
+Pass `op_environment_id` and `OP_SERVICE_ACCOUNT_TOKEN` to the deploy workflow:
+
+```yaml
+deploy:
+  uses: maisengasse-gmbh/maisen-ci/.github/workflows/deploy.yml@v2
+  with:
+    op_environment_id: ${{ vars.OP_ENVIRONMENT_ID }}
+  secrets:
+    SSH_PRIVATE_KEY: ${{ secrets.SSH_PRIVATE_KEY }}
+    SSH_KNOWN_HOSTS: ${{ secrets.SSH_KNOWN_HOSTS }}
+    OP_SERVICE_ACCOUNT_TOKEN: ${{ secrets.OP_SERVICE_ACCOUNT_TOKEN }}
+```
+
+The workflow will run `op inject` on the server to produce the `.env` file from a committed `.env.tpl`.
+
+### Migration from ENV_FILE
+
+1. Add `.env.tpl` to the repo with `op://` references for all secrets.
+2. Remove the `ENV_FILE` secret from GitHub.
+3. Add `OP_SERVICE_ACCOUNT_TOKEN` secret and `OP_ENVIRONMENT_ID` variable to GitHub.
+4. Update the workflow call as shown above (remove `ENV_FILE:`, add `OP_SERVICE_ACCOUNT_TOKEN:`).
+
+### Rollback
+
+To revert to the `ENV_FILE` approach:
+
+1. Remove `op_environment_id` from the workflow `with:` block.
+2. Re-add the `ENV_FILE` secret to GitHub.
+3. Pass it in `secrets:` as `ENV_FILE: ${{ secrets.ENV_FILE }}`.
+
 ## Required Server Setup
 
 1. Docker + Docker Compose v2 installed
