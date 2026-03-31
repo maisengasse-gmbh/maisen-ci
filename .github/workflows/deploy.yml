@@ -14,12 +14,18 @@ on:
       health_check_url:
         type: string
         default: ""
-      run_migrations:
-        type: boolean
-        default: true
+      backend_container:
+        type: string
+        default: "backend"
+        description: "Docker Compose service name for the app container (readiness check + command execution)"
       migration_command:
         type: string
-        default: "python manage.py migrate --noinput"
+        default: ""
+        description: "Migration command to run in backend_container. Empty = skip. (e.g. 'python manage.py migrate --noinput')"
+      post_deploy_commands:
+        type: string
+        default: ""
+        description: "Newline-separated commands to run in backend_container after migrations. Empty = skip. (e.g. 'python manage.py collectstatic --noinput')"
       ssh_user:
         type: string
         required: true
@@ -38,22 +44,10 @@ on:
         type: string
         default: ".env"
         description: "Path on server (relative to deploy_path) where ENV_FILE secret is written"
-      backup_enabled:
-        type: boolean
-        default: true
-        description: "Create a DB backup before running migrations"
-      backup_container:
-        type: string
-        default: "db"
-        description: "Docker Compose service name for the database"
-      backup_db_user:
-        type: string
-        default: "postgres"
-        description: "Database user for pg_dump"
-      backup_db_name:
+      backup_command:
         type: string
         default: ""
-        description: "Database name for pg_dump (empty = skip backup)"
+        description: "Full backup command run via SSH on server. Empty = skip. Output piped to backup file. (e.g. 'docker exec $(docker compose ps -q db) pg_dump -U myuser -Fc mydb')"
       backup_path:
         type: string
         default: "/tmp/backups"
@@ -128,18 +122,19 @@ jobs:
           echo "Wrote env file to $DEPLOY_PATH/$ENV_FILE_PATH"
 
       - name: Pre-deploy backup
-        if: inputs.backup_enabled && inputs.backup_db_name != ''
+        if: inputs.backup_command != ''
         env:
           SSH_TARGET: ${{ inputs.ssh_user }}@${{ inputs.ssh_host }}
           DEPLOY_PATH: ${{ inputs.deploy_path }}
-          COMPOSE_FILES: ${{ steps.compose.outputs.flags }}
+          BACKUP_CMD: ${{ inputs.backup_command }}
         run: |
           TIMESTAMP=$(date -u +%Y%m%d_%H%M%S)
-          BACKUP_FILE="${{ inputs.backup_path }}/${{ inputs.backup_db_name }}_pre-deploy_${TIMESTAMP}.dump"
+          BACKUP_FILE="${{ inputs.backup_path }}/pre-deploy_${TIMESTAMP}.dump"
           ssh $SSH_TARGET "mkdir -p ${{ inputs.backup_path }}"
-          ssh $SSH_TARGET "cd $DEPLOY_PATH && docker compose $COMPOSE_FILES exec -T ${{ inputs.backup_container }} pg_dump -U ${{ inputs.backup_db_user }} -Fc ${{ inputs.backup_db_name }}" > /tmp/backup.dump
+          ssh $SSH_TARGET "cd $DEPLOY_PATH && $BACKUP_CMD" > /tmp/backup.dump
           scp /tmp/backup.dump "$SSH_TARGET:$BACKUP_FILE"
-          ssh $SSH_TARGET "find ${{ inputs.backup_path }} -name '${{ inputs.backup_db_name }}_pre-deploy_*' -mtime +${{ inputs.backup_retention_days }} -delete"
+          rm -f /tmp/backup.dump
+          ssh $SSH_TARGET "find ${{ inputs.backup_path }} -name 'pre-deploy_*' -mtime +${{ inputs.backup_retention_days }} -delete"
           echo "Backup created: $BACKUP_FILE"
 
       - name: Deploy to server
@@ -163,7 +158,7 @@ jobs:
 
             echo "Waiting for backend container to be ready..."
             for i in \$(seq 1 30); do
-              STATUS=\$(docker compose $COMPOSE_FILES ps --format '{{.State}}' backend 2>/dev/null || echo "unknown")
+              STATUS=\$(docker compose $COMPOSE_FILES ps --format '{{.State}}' ${{ inputs.backend_container }} 2>/dev/null || echo "unknown")
               if [ "\$STATUS" = "running" ]; then
                 echo "Backend container is running (attempt \$i/30)"
                 break
@@ -171,7 +166,7 @@ jobs:
               if [ "\$STATUS" = "restarting" ] || [ "\$STATUS" = "exited" ] || [ "\$STATUS" = "dead" ]; then
                 echo "Backend container failed with status: \$STATUS"
                 echo "=== Container Logs ==="
-                docker compose $COMPOSE_FILES logs --tail=50 backend
+                docker compose $COMPOSE_FILES logs --tail=50 ${{ inputs.backend_container }}
                 exit 1
               fi
               echo "Waiting for backend... (attempt \$i/30, status: \$STATUS)"
@@ -181,7 +176,7 @@ jobs:
             if [ "\$STATUS" != "running" ]; then
               echo "Backend container did not become ready in time (status: \$STATUS)"
               echo "=== Container Logs ==="
-              docker compose $COMPOSE_FILES logs --tail=50 backend
+              docker compose $COMPOSE_FILES logs --tail=50 ${{ inputs.backend_container }}
               exit 1
             fi
 
@@ -189,26 +184,38 @@ jobs:
           ENDSSH
 
       - name: Run migrations
-        if: inputs.run_migrations
+        if: inputs.migration_command != ''
         env:
           SSH_TARGET: ${{ inputs.ssh_user }}@${{ inputs.ssh_host }}
           DEPLOY_PATH: ${{ inputs.deploy_path }}
           COMPOSE_FILES: ${{ steps.compose.outputs.flags }}
           MIGRATION_CMD: ${{ inputs.migration_command }}
+          CONTAINER: ${{ inputs.backend_container }}
         run: |
-          ssh $SSH_TARGET "cd $DEPLOY_PATH && docker compose $COMPOSE_FILES exec -T backend $MIGRATION_CMD" || {
-            echo "=== Migration failed - Backend Logs ==="
-            ssh $SSH_TARGET "cd $DEPLOY_PATH && docker compose $COMPOSE_FILES logs --tail=50 backend"
+          ssh $SSH_TARGET "cd $DEPLOY_PATH && docker compose $COMPOSE_FILES exec -T $CONTAINER $MIGRATION_CMD" || {
+            echo "=== Migration failed - Container Logs ==="
+            ssh $SSH_TARGET "cd $DEPLOY_PATH && docker compose $COMPOSE_FILES logs --tail=50 $CONTAINER"
             exit 1
           }
 
-      - name: Collect static files
+      - name: Post-deploy commands
+        if: inputs.post_deploy_commands != ''
         env:
           SSH_TARGET: ${{ inputs.ssh_user }}@${{ inputs.ssh_host }}
           DEPLOY_PATH: ${{ inputs.deploy_path }}
           COMPOSE_FILES: ${{ steps.compose.outputs.flags }}
+          CONTAINER: ${{ inputs.backend_container }}
+          COMMANDS: ${{ inputs.post_deploy_commands }}
         run: |
-          ssh $SSH_TARGET "cd $DEPLOY_PATH && docker compose $COMPOSE_FILES exec -T backend python manage.py collectstatic --noinput"
+          echo "$COMMANDS" | while IFS= read -r cmd; do
+            [ -z "$cmd" ] && continue
+            echo "Running: $cmd"
+            ssh $SSH_TARGET "cd $DEPLOY_PATH && docker compose $COMPOSE_FILES exec -T $CONTAINER $cmd" || {
+              echo "=== Command failed: $cmd ==="
+              ssh $SSH_TARGET "cd $DEPLOY_PATH && docker compose $COMPOSE_FILES logs --tail=50 $CONTAINER"
+              exit 1
+            }
+          done
 
       - name: Health check
         if: inputs.health_check_url != ''
