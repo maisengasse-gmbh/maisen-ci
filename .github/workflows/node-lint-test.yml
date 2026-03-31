@@ -1,0 +1,113 @@
+name: Node.js Lint & Test
+
+on:
+  workflow_call:
+    inputs:
+      node_version:
+        type: string
+        default: "22"
+      working_directory:
+        type: string
+        default: "."
+      lint_command:
+        type: string
+        default: "npm run lint"
+        description: "Lint command. Empty = skip."
+      test_command:
+        type: string
+        default: "npm test"
+        description: "Test command. Empty = skip."
+      database_image:
+        type: string
+        default: ""
+        description: "Database service image. Empty = no database. (e.g. postgres:16, mysql:8.0)"
+      database_port:
+        type: string
+        default: "5432"
+        description: "Database port"
+      database_url:
+        type: string
+        default: ""
+        description: "DATABASE_URL env var for tests"
+      cache_image:
+        type: string
+        default: ""
+        description: "Cache service image. Empty = no cache."
+      system_packages:
+        type: string
+        default: ""
+        description: "Additional apt packages to install (space-separated)"
+      env_file:
+        type: string
+        default: ""
+        description: "Path to .env file to load into GITHUB_ENV before tests"
+      extra_env:
+        type: string
+        default: ""
+        description: "Extra environment variables (KEY=VALUE, one per line)"
+
+jobs:
+  lint-test:
+    runs-on: ubuntu-latest
+
+    services:
+      database:
+        image: ${{ inputs.database_image || 'alpine:3' }}
+        ports:
+          - ${{ inputs.database_port }}:${{ inputs.database_port }}
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: test_db
+          MYSQL_ROOT_PASSWORD: password
+          MYSQL_DATABASE: test_db
+        options: >-
+          ${{ inputs.database_image && '--health-cmd "pg_isready -U postgres 2>/dev/null || mysqladmin ping -h localhost 2>/dev/null" --health-interval 10s --health-timeout 5s --health-retries 5' || '' }}
+
+      cache:
+        image: ${{ inputs.cache_image || 'alpine:3' }}
+        ports:
+          - 6379:6379
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install system packages
+        if: inputs.system_packages != ''
+        run: |
+          sudo apt-get update -q
+          sudo apt-get install -y --no-install-recommends ${{ inputs.system_packages }}
+
+      - name: Set up Node.js ${{ inputs.node_version }}
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ inputs.node_version }}
+          cache: npm
+          cache-dependency-path: ${{ inputs.working_directory }}/package-lock.json
+
+      - name: Install dependencies
+        working-directory: ${{ inputs.working_directory }}
+        run: npm ci
+
+      - name: Load env file
+        if: inputs.env_file != ''
+        working-directory: ${{ inputs.working_directory }}
+        run: cat "${{ inputs.env_file }}" >> $GITHUB_ENV
+
+      - name: Load extra env
+        if: inputs.extra_env != ''
+        run: echo "${{ inputs.extra_env }}" >> $GITHUB_ENV
+
+      - name: Lint
+        if: inputs.lint_command != ''
+        working-directory: ${{ inputs.working_directory }}
+        run: ${{ inputs.lint_command }}
+
+      - name: Run tests
+        if: inputs.test_command != ''
+        working-directory: ${{ inputs.working_directory }}
+        env:
+          DATABASE_URL: ${{ inputs.database_url }}
+          NODE_ENV: test
+        run: ${{ inputs.test_command }}
