@@ -7,14 +7,10 @@ on:
         type: string
         required: true
         description: "Absolute path on server"
-      compose_files:
-        type: string
-        default: "-f docker-compose.base.yml -f docker-compose.prod.yml"
-        description: "Docker Compose file flags relative to deploy_path (e.g. -f docker/base.yml -f docker/prod.yml)"
       compose_source_files:
         type: string
-        default: ""
-        description: "Space-separated compose files in repo to SCP to server (e.g. path/to/docker-compose.base.yml path/to/docker-compose.prod.yml)"
+        required: true
+        description: "Space-separated compose files to SCP and use (e.g. docker/docker-compose.base.yml docker/docker-compose.prod.yml)"
       health_check_url:
         type: string
         default: ""
@@ -94,8 +90,17 @@ jobs:
           echo "${{ secrets.SSH_KNOWN_HOSTS }}" >> ~/.ssh/known_hosts
           chmod 644 ~/.ssh/known_hosts
 
+      - name: Build compose flags
+        id: compose
+        run: |
+          FLAGS="--env-file ${{ inputs.env_file_path }}"
+          for file in ${{ inputs.compose_source_files }}; do
+            FLAGS="$FLAGS -f $file"
+          done
+          echo "flags=$FLAGS" >> $GITHUB_OUTPUT
+          echo "Compose flags: $FLAGS"
+
       - name: Copy compose files to server
-        if: inputs.compose_source_files != ''
         env:
           SSH_TARGET: ${{ inputs.ssh_user }}@${{ inputs.ssh_host }}
           DEPLOY_PATH: ${{ inputs.deploy_path }}
@@ -127,7 +132,7 @@ jobs:
         env:
           SSH_TARGET: ${{ inputs.ssh_user }}@${{ inputs.ssh_host }}
           DEPLOY_PATH: ${{ inputs.deploy_path }}
-          COMPOSE_FILES: ${{ inputs.compose_files }}
+          COMPOSE_FILES: ${{ steps.compose.outputs.flags }}
         run: |
           TIMESTAMP=$(date -u +%Y%m%d_%H%M%S)
           BACKUP_FILE="${{ inputs.backup_path }}/${{ inputs.backup_db_name }}_pre-deploy_${TIMESTAMP}.dump"
@@ -141,7 +146,7 @@ jobs:
         env:
           SSH_TARGET: ${{ inputs.ssh_user }}@${{ inputs.ssh_host }}
           DEPLOY_PATH: ${{ inputs.deploy_path }}
-          COMPOSE_FILES: ${{ inputs.compose_files }}
+          COMPOSE_FILES: ${{ steps.compose.outputs.flags }}
         run: |
           ssh $SSH_TARGET << ENDSSH
             set -e
@@ -188,7 +193,7 @@ jobs:
         env:
           SSH_TARGET: ${{ inputs.ssh_user }}@${{ inputs.ssh_host }}
           DEPLOY_PATH: ${{ inputs.deploy_path }}
-          COMPOSE_FILES: ${{ inputs.compose_files }}
+          COMPOSE_FILES: ${{ steps.compose.outputs.flags }}
           MIGRATION_CMD: ${{ inputs.migration_command }}
         run: |
           ssh $SSH_TARGET "cd $DEPLOY_PATH && docker compose $COMPOSE_FILES exec -T backend $MIGRATION_CMD" || {
@@ -201,7 +206,7 @@ jobs:
         env:
           SSH_TARGET: ${{ inputs.ssh_user }}@${{ inputs.ssh_host }}
           DEPLOY_PATH: ${{ inputs.deploy_path }}
-          COMPOSE_FILES: ${{ inputs.compose_files }}
+          COMPOSE_FILES: ${{ steps.compose.outputs.flags }}
         run: |
           ssh $SSH_TARGET "cd $DEPLOY_PATH && docker compose $COMPOSE_FILES exec -T backend python manage.py collectstatic --noinput"
 
