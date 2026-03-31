@@ -6,10 +6,14 @@ Shared GitHub Actions CI/CD workflows for Maisengasse projects.
 
 | Workflow | Purpose |
 |----------|---------|
-| `django-lint-test.yml` | Ruff lint + pytest with PostgreSQL & Redis |
-| `vue-build.yml` | ESLint + Vite build |
+| `django-lint-test.yml` | Ruff lint + pytest (PostgreSQL + Valkey) |
+| `laravel-lint-test.yml` | Laravel Pint + PHPUnit (MySQL/PostgreSQL + Valkey) |
+| `node-lint-test.yml` | npm lint + test (optional DB + cache) |
+| `frontend-build.yml` | npm lint + build (any framework: Vue, React, Svelte, etc.) |
+| `flutter-build.yml` | Flutter analyze + test + optional build |
 | `docker-build-push.yml` | Docker build + push to ghcr.io |
-| `deploy.yml` | SSH-based deploy with Docker Compose |
+| `deploy.yml` | SSH deploy with configurable migrations, post-deploy commands, backup |
+| `vue-build.yml` | **Deprecated** — alias for frontend-build.yml |
 
 ## Usage
 
@@ -26,22 +30,22 @@ on:
 
 jobs:
   lint-test:
-    uses: maisengasse-gmbh/maisen-ci/.github/workflows/django-lint-test.yml@main
+    uses: maisengasse-gmbh/maisen-ci/.github/workflows/django-lint-test.yml@v2
     with:
       working_directory: path/to/django
       pytest_args: "--ds myapp.settings.test -x"
       project_name: myproject
       project_verbose_name: "My Project"
 
-  vue-build:
-    uses: maisengasse-gmbh/maisen-ci/.github/workflows/vue-build.yml@main
+  frontend-build:
+    uses: maisengasse-gmbh/maisen-ci/.github/workflows/frontend-build.yml@v2
     with:
       working_directory: path/to/frontend
 
   build-backend:
     if: (github.event_name == 'push' || github.event_name == 'workflow_dispatch') && github.ref == 'refs/heads/main'
-    needs: [lint-test, vue-build]
-    uses: maisengasse-gmbh/maisen-ci/.github/workflows/docker-build-push.yml@main
+    needs: [lint-test, frontend-build]
+    uses: maisengasse-gmbh/maisen-ci/.github/workflows/docker-build-push.yml@v2
     permissions:
       contents: read
       packages: write
@@ -55,7 +59,7 @@ jobs:
   deploy:
     if: (github.event_name == 'push' || github.event_name == 'workflow_dispatch') && github.ref == 'refs/heads/main'
     needs: [build-backend]
-    uses: maisengasse-gmbh/maisen-ci/.github/workflows/deploy.yml@main
+    uses: maisengasse-gmbh/maisen-ci/.github/workflows/deploy.yml@v2
     permissions:
       contents: write
     with:
@@ -72,6 +76,49 @@ jobs:
       ENV_FILE: ${{ secrets.ENV_FILE }}
 ```
 
+### Laravel project
+
+```yaml
+  lint-test:
+    uses: maisengasse-gmbh/maisen-ci/.github/workflows/laravel-lint-test.yml@v2
+    with:
+      working_directory: path/to/laravel
+      php_version: "8.3"
+      database: mysql
+```
+
+### Node.js project
+
+```yaml
+  lint-test:
+    uses: maisengasse-gmbh/maisen-ci/.github/workflows/node-lint-test.yml@v2
+    with:
+      working_directory: path/to/node
+      node_version: "22"
+      test_command: "npm test"
+```
+
+### Frontend build (Vue / React / Svelte / etc.)
+
+```yaml
+  frontend-build:
+    uses: maisengasse-gmbh/maisen-ci/.github/workflows/frontend-build.yml@v2
+    with:
+      working_directory: path/to/frontend
+      build_command: "npm run build"
+```
+
+### Flutter project
+
+```yaml
+  flutter-build:
+    uses: maisengasse-gmbh/maisen-ci/.github/workflows/flutter-build.yml@v2
+    with:
+      working_directory: path/to/flutter
+      flutter_version: "3.24.0"
+      build_target: apk
+```
+
 ## Workflow Inputs
 
 ### django-lint-test.yml
@@ -84,18 +131,52 @@ jobs:
 | `pytest_args` | `--ds settings.test -x` | Pytest arguments |
 | `postgres_version` | `16` | PostgreSQL version |
 | `database_url` | `postgres://postgres:postgres@localhost:5432/test_db` | Database URL |
-| `cache_url` | `redis://localhost:6379/0` | Cache URL |
+| `cache_url` | `redis://localhost:6379/0` | Cache/Valkey URL |
 | `project_name` | `""` | Django PROJECT_NAME env var |
 | `project_verbose_name` | `""` | Django PROJECT_VERBOSE_NAME env var |
 
-### vue-build.yml
+### laravel-lint-test.yml
+
+| Input | Default | Description |
+|-------|---------|-------------|
+| `php_version` | `8.3` | PHP version |
+| `working_directory` | `.` | Path to Laravel project |
+| `database` | `mysql` | Database engine (`mysql` or `pgsql`) |
+| `mysql_version` | `8.0` | MySQL version (used when database is mysql) |
+| `postgres_version` | `16` | PostgreSQL version (used when database is pgsql) |
+| `cache_url` | `redis://localhost:6379/0` | Cache/Valkey URL |
+
+### node-lint-test.yml
 
 | Input | Default | Description |
 |-------|---------|-------------|
 | `node_version` | `22` | Node.js version |
-| `working_directory` | `.` | Path to Vue project |
+| `working_directory` | `.` | Path to Node project |
+| `lint_command` | `npm run lint` | Lint command |
+| `test_command` | `npm test` | Test command |
+| `with_database` | `false` | Spin up a PostgreSQL service |
+| `with_cache` | `false` | Spin up a Valkey/Redis service |
+
+### frontend-build.yml
+
+| Input | Default | Description |
+|-------|---------|-------------|
+| `node_version` | `22` | Node.js version |
+| `working_directory` | `.` | Path to frontend project |
 | `lint_command` | `npm run lint` | Lint command |
 | `build_command` | `npm run build` | Build command |
+
+### vue-build.yml
+
+Deprecated alias for `frontend-build.yml`. Accepts the same inputs. Use `frontend-build.yml` for new projects.
+
+### flutter-build.yml
+
+| Input | Default | Description |
+|-------|---------|-------------|
+| `flutter_version` | `stable` | Flutter SDK version or channel |
+| `working_directory` | `.` | Path to Flutter project |
+| `build_target` | `""` | Build target (`apk`, `ios`, `web`, etc.) — skipped if empty |
 
 ### docker-build-push.yml
 
@@ -115,8 +196,10 @@ jobs:
 | `compose_source_files` | `""` | Space-separated files to SCP to server before deploy |
 | `env_file_path` | `.env` | Path (relative to deploy_path) where ENV_FILE secret is written |
 | `health_check_url` | `""` | URL for health check after deploy |
-| `run_migrations` | `true` | Run Django migrations |
-| `migration_command` | `python manage.py migrate --noinput` | Migration command |
+| `backend_container` | `backend` | Container name used for migration and post-deploy commands |
+| `migration_command` | `""` | Command to run inside backend container after deploy (e.g. `python manage.py migrate --noinput`) — skipped if empty |
+| `post_deploy_commands` | `""` | Additional commands to run inside backend container after migrations — skipped if empty |
+| `backup_command` | `""` | Command to run on server before pulling new images (e.g. a DB dump script) — skipped if empty |
 | `ssh_user` | (required) | SSH username |
 | `ssh_host` | (required) | SSH hostname |
 | `create_tag` | `true` | Create a git tag after successful deploy |
@@ -133,14 +216,33 @@ jobs:
 ## Deploy Process
 
 1. Checkout repo (for compose files and tagging)
-2. SCP compose/env template files to server (if `compose_source_files` set)
-3. Write `.env` from `ENV_FILE` secret to server (if `env_file_path` set)
-4. SSH to server: `docker compose pull` + `up -d`
-5. Run migrations + collectstatic
-6. Health check (if URL provided)
-7. Create git tag (if enabled)
+2. Run backup command on server (if `backup_command` set)
+3. SCP compose/env template files to server (if `compose_source_files` set)
+4. Write `.env` from `ENV_FILE` secret to server (if `env_file_path` set)
+5. SSH to server: `docker compose pull` + `up -d`
+6. Run migration command inside backend container (if `migration_command` set)
+7. Run post-deploy commands inside backend container (if `post_deploy_commands` set)
+8. Health check (if URL provided)
+9. Create git tag (if enabled)
 
 No git repo needed on the server. All files are copied via SCP.
+
+## Version Pinning
+
+Use major version tags to pin workflows:
+
+| Tag | Description |
+|-----|-------------|
+| `@v1` | Last stable release before multi-stack refactoring |
+| `@v2` | Generic deploy, new stack workflows, Valkey defaults |
+
+Example:
+
+```yaml
+uses: maisengasse-gmbh/maisen-ci/.github/workflows/deploy.yml@v2
+```
+
+Breaking changes only happen on major version bumps. Consumer projects can revert to `@v1` with a one-line change if `@v2` causes issues.
 
 ## Required Server Setup
 
