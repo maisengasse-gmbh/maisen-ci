@@ -103,6 +103,10 @@ jobs:
           OP_SERVICE_ACCOUNT_TOKEN: ${{ secrets.OP_SERVICE_ACCOUNT_TOKEN }}
         run: |
           op environment read ${{ inputs.op_environment_id }} > /tmp/.env.deploy
+          if [ ! -s /tmp/.env.deploy ]; then
+            echo "Warning: op environment read returned empty, check Service Account permissions"
+            exit 1
+          fi
           ssh $SSH_TARGET "mkdir -p $DEPLOY_PATH/$(dirname $ENV_FILE_PATH)"
           scp /tmp/.env.deploy "$SSH_TARGET:$DEPLOY_PATH/$ENV_FILE_PATH"
           rm -f /tmp/.env.deploy
