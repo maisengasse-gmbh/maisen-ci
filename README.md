@@ -252,37 +252,50 @@ Breaking changes only happen on major version bumps. Consumer projects can rever
 
 ### Setup
 
-1. **Install the `op` CLI** (for local development):
+1. **Install `op` CLI Beta** (Environments brauchen >= 2.34.0):
    ```bash
-   brew install 1password-cli
+   brew install 1password-cli@beta
    ```
 
-2. **Create Environments in the 1Password Desktop App** — one per deployment stage per project (e.g. `my-project-dev`, `my-project-prod`).
+2. **1Password Environments anlegen** — in der Desktop App unter Developer → Environments. Pro Projekt ein Dev- und ein Prod-Environment (z.B. `lwl-operator-dev`, `lwl-operator-prod`).
 
-3. **Create a Service Account** in 1Password with read access to the production Environment(s).
+3. **Service Account erstellen** in 1Password Web mit Read-Zugriff auf die Environments. Wichtig: **Environments explizit auswählen** bei der Erstellung (kann nachträglich nicht geändert werden).
 
-4. **Configure GitHub** for the consumer repo:
-   - Repository variable: `OP_ENVIRONMENT_ID` — the ID of the 1Password Environment for production
-   - Repository secret: `OP_SERVICE_ACCOUNT_TOKEN` — the service account token
+4. **GitHub konfigurieren** (pro Consumer-Repo):
+   - Repository **Variable**: `OP_ENVIRONMENT_ID` — die Prod-Environment ID (nicht Secret, nur ein Identifier)
+   - Repository **Secret**: `OP_SERVICE_ACCOUNT_TOKEN` — der Service Account Token
 
 ### Local Development
 
-Add a `.env.tpl` file to the repo with `op://` references:
-
-```dotenv
-DATABASE_URL=op://my-project-prod/database/url
-SECRET_KEY=op://my-project-prod/django/secret-key
-```
-
-Run `make up` — the Makefile should auto-generate `.env` via:
+Jedes Projekt hat eine `.env.op` Datei (gitignored) mit der 1Password-Konfiguration:
 
 ```bash
-op inject -i .env.tpl -o .env
+# .env.op — nicht committen, pro Dev lokal
+OP_ENV_ID=deine-environment-id
+OP_SERVICE_ACCOUNT_TOKEN=dein-service-account-token
+```
+
+`make env` liest `.env.op` und generiert `.env` aus 1Password. `make up` ruft `make env` automatisch auf. Wenn `.env.op` nicht existiert, wird eine Vorlage erstellt.
+
+Makefile-Pattern:
+
+```makefile
+.PHONY: env
+env:
+	@test -f .env.op || { \
+		echo "OP_ENV_ID=HIER_ID" > .env.op; \
+		echo "OP_SERVICE_ACCOUNT_TOKEN=HIER_TOKEN" >> .env.op; \
+		echo "⚠ .env.op erstellt. Bitte Werte eintragen!"; exit 1; }
+	@export OP_SERVICE_ACCOUNT_TOKEN=$$(grep OP_SERVICE_ACCOUNT_TOKEN .env.op | cut -d= -f2) && \
+		op environment read $$(grep OP_ENV_ID .env.op | cut -d= -f2) > .env
+
+up: env
+	$$(DC) up -d
 ```
 
 ### CI/CD
 
-Pass `op_environment_id` and `OP_SERVICE_ACCOUNT_TOKEN` to the deploy workflow:
+`deploy.yml` nutzt `op environment read` mit der Beta-CLI um die `.env` auf dem Server zu generieren:
 
 ```yaml
 deploy:
@@ -295,14 +308,13 @@ deploy:
     OP_SERVICE_ACCOUNT_TOKEN: ${{ secrets.OP_SERVICE_ACCOUNT_TOKEN }}
 ```
 
-The workflow will run `op inject` on the server to produce the `.env` file from a committed `.env.tpl`.
-
 ### Migration from ENV_FILE
 
-1. Add `.env.tpl` to the repo with `op://` references for all secrets.
-2. Remove the `ENV_FILE` secret from GitHub.
-3. Add `OP_SERVICE_ACCOUNT_TOKEN` secret and `OP_ENVIRONMENT_ID` variable to GitHub.
-4. Update the workflow call as shown above (remove `ENV_FILE:`, add `OP_SERVICE_ACCOUNT_TOKEN:`).
+1. 1Password Environments anlegen und Secrets importieren (`.env.dev` / `.env.prod` als Import-Dateien).
+2. `.env.op` pro Projekt erstellen mit `OP_ENV_ID` und `OP_SERVICE_ACCOUNT_TOKEN`.
+3. `OP_SERVICE_ACCOUNT_TOKEN` Secret und `OP_ENVIRONMENT_ID` Variable in GitHub setzen.
+4. CI-Workflow anpassen: `op_environment_id` und `OP_SERVICE_ACCOUNT_TOKEN` übergeben.
+5. Testen, dann `ENV_FILE` Secret aus GitHub entfernen.
 
 ### Rollback
 
