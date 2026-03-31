@@ -155,11 +155,15 @@ jobs:
           TIMESTAMP=$(date -u +%Y%m%d_%H%M%S)
           BACKUP_FILE="${{ inputs.backup_path }}/pre-deploy_${TIMESTAMP}.dump"
           ssh $SSH_TARGET "mkdir -p ${{ inputs.backup_path }}"
-          ssh $SSH_TARGET "cd $DEPLOY_PATH && $BACKUP_CMD" > /tmp/backup.dump
-          scp /tmp/backup.dump "$SSH_TARGET:$BACKUP_FILE"
-          rm -f /tmp/backup.dump
-          ssh $SSH_TARGET "find ${{ inputs.backup_path }} -name 'pre-deploy_*' -mtime +${{ inputs.backup_retention_days }} -delete"
-          echo "Backup created: $BACKUP_FILE"
+          if ssh $SSH_TARGET "cd $DEPLOY_PATH && $BACKUP_CMD" > /tmp/backup.dump 2>&1; then
+            scp /tmp/backup.dump "$SSH_TARGET:$BACKUP_FILE"
+            rm -f /tmp/backup.dump
+            ssh $SSH_TARGET "find ${{ inputs.backup_path }} -name 'pre-deploy_*' -mtime +${{ inputs.backup_retention_days }} -delete"
+            echo "Backup created: $BACKUP_FILE"
+          else
+            echo "⚠️ Backup skipped (no running database container or first deploy)"
+            rm -f /tmp/backup.dump
+          fi
 
       - name: Deploy to server
         env:
