@@ -319,10 +319,70 @@ To revert to the `ENV_FILE` approach:
 3. One-time `docker login ghcr.io` with a classic PAT (`read:packages` scope)
 4. SSH access for the deploy user (Ed25519 key in `authorized_keys`)
 
-## Required GitHub Secrets (per consumer repo)
+## SSH Deploy Key einrichten
 
-| Secret | Purpose |
-|--------|---------|
-| `SSH_PRIVATE_KEY` | Ed25519 SSH key for deployment server |
-| `SSH_KNOWN_HOSTS` | SSH known_hosts entry for the server |
-| `ENV_FILE` | Production .env file contents (optional) |
+Die CI-Pipeline verbindet sich per SSH zum Produktionsserver. Dafür braucht es ein Ed25519 Keypair.
+
+### 1. Key erstellen (einmalig pro Projekt)
+
+```bash
+ssh-keygen -t ed25519 -f ~/.ssh/projektname-deploy -C "projektname-deploy" -N ""
+```
+
+### 2. Public Key auf dem Server hinterlegen
+
+```bash
+# Public Key anzeigen
+cat ~/.ssh/projektname-deploy.pub
+
+# Auf dem Server eintragen
+ssh op@mgh3.mynet.at "echo 'INHALT_VON_PUB_KEY' >> ~/.ssh/authorized_keys"
+```
+
+Oder manuell: Per SSH auf den Server → `~/.ssh/authorized_keys` bearbeiten → Public Key am Ende einfügen.
+
+### 3. GitHub Secrets setzen
+
+Am einfachsten per CLI (vermeidet Copy-Paste-Fehler):
+
+```bash
+# Private Key direkt aus Datei setzen
+gh secret set SSH_PRIVATE_KEY < ~/.ssh/projektname-deploy
+
+# Known Hosts direkt vom Server holen und setzen
+ssh-keyscan mgh3.mynet.at 2>/dev/null | gh secret set SSH_KNOWN_HOSTS
+```
+
+Alternativ im Browser: GitHub Repo → Settings → Secrets and variables → Actions → New repository secret.
+
+### 4. Testen
+
+```bash
+gh workflow run ci.yml
+```
+
+Bei SSH-Fehlern im Deploy-Step:
+- `error in libcrypto` → Key ist beschädigt, nochmal mit `gh secret set` aus Datei setzen
+- `Permission denied (publickey)` → Public Key nicht in `authorized_keys` auf dem Server
+- `Host key verification failed` → `SSH_KNOWN_HOSTS` Secret fehlt oder ist veraltet, nochmal mit `ssh-keyscan` setzen
+
+## GitHub Secrets & Variables (pro Consumer-Repo)
+
+### Secrets
+
+| Secret | Required | Beschreibung |
+|--------|----------|-------------|
+| `SSH_PRIVATE_KEY` | Ja | Ed25519 Private Key (`gh secret set SSH_PRIVATE_KEY < ~/.ssh/key`) |
+| `SSH_KNOWN_HOSTS` | Ja | Host Keys (`ssh-keyscan host \| gh secret set SSH_KNOWN_HOSTS`) |
+| `OP_SERVICE_ACCOUNT_TOKEN` | Ja* | 1Password Service Account Token |
+| `ENV_FILE` | Nein | Fallback: komplette .env als Plaintext (deprecated, nutze 1Password) |
+
+*Wenn 1Password Environments genutzt werden.
+
+### Variables
+
+| Variable | Required | Beschreibung |
+|----------|----------|-------------|
+| `OP_ENVIRONMENT_ID` | Ja* | 1Password Prod-Environment ID (nicht geheim, nur ein Identifier) |
+
+*Wenn 1Password Environments genutzt werden.
