@@ -24,11 +24,11 @@ on:
         description: "Custom PostgreSQL image (e.g. postgis/postgis:16-3.4). Overrides postgres_version."
       cache_image:
         type: string
-        default: "redis:5.0-alpine"
+        default: "valkey/valkey:8-alpine"
         description: "Cache service image (redis or valkey)"
       cache_health_cmd:
         type: string
-        default: "redis-cli ping"
+        default: "valkey-cli ping"
         description: "Health check command for cache service"
       database_url:
         type: string
