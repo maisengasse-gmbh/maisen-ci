@@ -56,12 +56,18 @@ on:
         type: string
         default: "30"
         description: "Delete backups older than N days"
+      op_environment_id:
+        type: string
+        default: ""
+        description: "1Password Environment ID for production secrets. If set, generates .env via op CLI instead of ENV_FILE secret."
     secrets:
       SSH_PRIVATE_KEY:
         required: true
       SSH_KNOWN_HOSTS:
         required: true
       ENV_FILE:
+        required: false
+      OP_SERVICE_ACCOUNT_TOKEN:
         required: false
 
 jobs:
@@ -83,6 +89,24 @@ jobs:
           chmod 600 ~/.ssh/id_ed25519
           echo "${{ secrets.SSH_KNOWN_HOSTS }}" >> ~/.ssh/known_hosts
           chmod 644 ~/.ssh/known_hosts
+
+      - name: Install 1Password CLI
+        if: inputs.op_environment_id != ''
+        uses: 1password/install-cli-action@v1
+
+      - name: Generate env file from 1Password
+        if: inputs.op_environment_id != ''
+        env:
+          SSH_TARGET: ${{ inputs.ssh_user }}@${{ inputs.ssh_host }}
+          DEPLOY_PATH: ${{ inputs.deploy_path }}
+          ENV_FILE_PATH: ${{ inputs.env_file_path }}
+          OP_SERVICE_ACCOUNT_TOKEN: ${{ secrets.OP_SERVICE_ACCOUNT_TOKEN }}
+        run: |
+          op environment read ${{ inputs.op_environment_id }} > /tmp/.env.deploy
+          ssh $SSH_TARGET "mkdir -p $DEPLOY_PATH/$(dirname $ENV_FILE_PATH)"
+          scp /tmp/.env.deploy "$SSH_TARGET:$DEPLOY_PATH/$ENV_FILE_PATH"
+          rm -f /tmp/.env.deploy
+          echo "Wrote env file from 1Password Environment to $DEPLOY_PATH/$ENV_FILE_PATH"
 
       - name: Build compose flags
         id: compose
@@ -108,7 +132,7 @@ jobs:
           done
 
       - name: Write env file to server
-        if: inputs.env_file_path != ''
+        if: inputs.op_environment_id == '' && inputs.env_file_path != ''
         env:
           SSH_TARGET: ${{ inputs.ssh_user }}@${{ inputs.ssh_host }}
           DEPLOY_PATH: ${{ inputs.deploy_path }}
