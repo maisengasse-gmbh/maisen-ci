@@ -90,9 +90,13 @@ jobs:
           echo "${{ secrets.SSH_KNOWN_HOSTS }}" >> ~/.ssh/known_hosts
           chmod 644 ~/.ssh/known_hosts
 
-      - name: Install 1Password CLI
+      - name: Install 1Password CLI (beta)
         if: inputs.op_environment_id != ''
-        uses: 1password/install-cli-action@v1
+        run: |
+          wget -qO op.zip "https://cache.agilebits.com/dist/1P/op2/pkg/v2.34.0-beta.04/op_linux_amd64_v2.34.0-beta.04.zip"
+          unzip -o op.zip -d /usr/local/bin
+          rm op.zip
+          op --version
 
       - name: Generate env file from 1Password
         if: inputs.op_environment_id != ''
