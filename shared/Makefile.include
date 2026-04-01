@@ -168,5 +168,4 @@ sync-skills: # Claude Code Plugins installieren/aktualisieren
 	done
 	@echo "Alle Plugins synchronisiert (Claude Code + Cursor)."
 
-.PHONY: setup
-setup: build up migrate # Ersteinrichtung (build + up + migrate)
+# setup ist projektspezifisch — im Projekt-Makefile definieren
