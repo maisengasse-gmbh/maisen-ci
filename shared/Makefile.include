@@ -18,7 +18,7 @@ OP_TOKEN = $$(grep OP_SERVICE_ACCOUNT_TOKEN .env.op | cut -d= -f2)
 
 .PHONY: help
 help: # Verfuegbare Befehle anzeigen
-	@grep -E '^[a-zA-Z0-9 _-]+:.*#'  Makefile | sort | while read -r l; do printf "\033[1;32m$$(echo $$l | cut -f 1 -d':')\033[00m:$$(echo $$l | cut -f 2- -d'#')\n"; done
+	@grep -hE '^[a-zA-Z0-9 _-]+:.*#' Makefile .maisen.mk 2>/dev/null | sort -u | while read -r l; do printf "\033[1;32m$$(echo $$l | cut -f 1 -d':')\033[00m:$$(echo $$l | cut -f 2- -d'#')\n"; done
 
 # =============================================================================
 # 1Password / Environment
