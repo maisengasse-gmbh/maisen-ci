@@ -106,17 +106,18 @@ jobs:
           ENV_FILE_PATH: ${{ inputs.env_file_path }}
           OP_SERVICE_ACCOUNT_TOKEN: ${{ secrets.OP_SERVICE_ACCOUNT_TOKEN }}
         run: |
-          echo "Token length: ${#OP_SERVICE_ACCOUNT_TOKEN}"
           echo "Environment ID: ${{ inputs.op_environment_id }}"
           op --version
-          op environment read ${{ inputs.op_environment_id }} > /tmp/.env.deploy 2>&1 || true
-          echo "Generated .env lines: $(wc -l < /tmp/.env.deploy)"
-          if [ ! -s /tmp/.env.deploy ]; then
-            echo "ERROR: op environment read returned empty output"
-            echo "Trying op vault list to check access..."
-            op vault list 2>&1 || true
+          op environment read ${{ inputs.op_environment_id }} > /tmp/.env.deploy 2>/tmp/.env.err
+          if [ $? -ne 0 ] || [ ! -s /tmp/.env.deploy ] || grep -q '^\[ERROR\]' /tmp/.env.deploy; then
+            echo "ERROR: op environment read fehlgeschlagen"
+            cat /tmp/.env.err 2>/dev/null
+            cat /tmp/.env.deploy 2>/dev/null
+            rm -f /tmp/.env.deploy /tmp/.env.err
             exit 1
           fi
+          rm -f /tmp/.env.err
+          echo "Generated .env lines: $(wc -l < /tmp/.env.deploy)"
           ssh $SSH_TARGET "mkdir -p $DEPLOY_PATH/$(dirname $ENV_FILE_PATH)"
           scp /tmp/.env.deploy "$SSH_TARGET:$DEPLOY_PATH/$ENV_FILE_PATH"
           rm -f /tmp/.env.deploy
