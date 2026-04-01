@@ -1,0 +1,172 @@
+# =============================================================================
+# Maisengasse Shared Makefile Targets
+# Inkludiert via: include .maisen.mk
+# Sync via: make sync-makefile
+#
+# Voraussetzung: Das Projekt-Makefile definiert diese Variablen VOR dem include:
+#   -include .env
+#   DC_BASE, DC, DC_PROD
+#   OP_DEV_ID (1Password Environment ID)
+# =============================================================================
+
+# 1Password Helper
+OP_TOKEN = $$(grep OP_SERVICE_ACCOUNT_TOKEN .env.op | cut -d= -f2)
+
+# =============================================================================
+# Hilfe
+# =============================================================================
+
+.PHONY: help
+help: # Verfuegbare Befehle anzeigen
+	@grep -E '^[a-zA-Z0-9 _-]+:.*#'  Makefile | sort | while read -r l; do printf "\033[1;32m$$(echo $$l | cut -f 1 -d':')\033[00m:$$(echo $$l | cut -f 2- -d'#')\n"; done
+
+# =============================================================================
+# 1Password / Environment
+# =============================================================================
+
+.PHONY: env
+env: # .env aus 1Password generieren (mit Fallback auf bestehende .env)
+	@if command -v op >/dev/null 2>&1 && test -f .env.op && grep -qv 'HIER_TOKEN' .env.op 2>/dev/null; then \
+		if [ ! -f .env ] || [ .env.op -nt .env ]; then \
+			export OP_SERVICE_ACCOUNT_TOKEN=$(OP_TOKEN) && \
+			op environment read $(OP_DEV_ID) > /tmp/.env.new 2>/dev/null && \
+			if [ -s /tmp/.env.new ] && ! grep -q '^\[ERROR\]' /tmp/.env.new; then \
+				mv /tmp/.env.new .env; \
+				echo ".env aus 1Password generiert"; \
+			else \
+				rm -f /tmp/.env.new; \
+				if [ -f .env ]; then echo "⚠ 1Password nicht erreichbar, bestehende .env wird verwendet"; \
+				else echo "Error: 1Password nicht erreichbar und keine .env vorhanden."; exit 1; fi; \
+			fi; \
+		fi; \
+	elif [ ! -f .env ]; then \
+		echo "Error: Keine .env vorhanden."; \
+		echo "  Option 1: 1Password einrichten → brew install 1password-cli@beta, dann .env.op mit Token anlegen"; \
+		echo "  Option 2: .env manuell anlegen"; \
+		exit 1; \
+	fi
+
+# =============================================================================
+# Docker
+# =============================================================================
+
+.PHONY: up
+up: env # Alle Container starten
+	$(DC) up -d
+
+.PHONY: up-frontend
+up-frontend: env # Nur Frontend-Container starten
+	$(DC) up -d frontend
+
+.PHONY: up-backend
+up-backend: env # Nur Backend-Container starten
+	$(DC) up -d backend
+
+.PHONY: down
+down: # Alle Container stoppen
+	$(DC) down
+
+.PHONY: restart
+restart: # Alle Container neustarten
+	$(DC) restart
+
+.PHONY: build
+build: # Alle Docker-Images bauen
+	$(DC) build
+
+.PHONY: build-frontend
+build-frontend: # Nur Frontend-Docker-Image bauen
+	$(DC) build frontend
+
+.PHONY: build-backend
+build-backend: # Nur Backend-Docker-Images bauen (backend + worker)
+	$(DC) build backend backend-worker
+
+.PHONY: logs
+logs: # Logs aller Container folgen
+	$(DC) logs -f
+
+.PHONY: logs-backend
+logs-backend: # Logs des Backends folgen
+	$(DC) logs -f backend
+
+.PHONY: logs-frontend
+logs-frontend: # Logs des Frontends folgen
+	$(DC) logs -f frontend
+
+.PHONY: config
+config: # Aktuelle Docker Compose Konfiguration pruefen
+	$(DC) config
+
+.PHONY: bash
+bash: # Shell im Backend-Container oeffnen
+	$(DC) exec backend bash
+
+.PHONY: bash-db
+bash-db: # psql im Datenbank-Container oeffnen
+	$(DC) exec db psql -U $(PROJECT_NAME) -d $(PROJECT_NAME)
+
+# =============================================================================
+# Django
+# =============================================================================
+
+.PHONY: migrate
+migrate: # Datenbank-Migrationen ausfuehren
+	$(DC) exec backend python manage.py migrate
+
+.PHONY: makemigrations
+makemigrations: # Neue Migrationen erstellen
+	$(DC) exec backend python manage.py makemigrations
+
+.PHONY: createsuperuser
+createsuperuser: # Superuser anlegen
+	$(DC) exec backend python manage.py createsuperuser
+
+.PHONY: collectstatic
+collectstatic: # Statische Dateien sammeln
+	$(DC) exec backend python manage.py collectstatic --noinput
+
+.PHONY: test
+test: # Tests ausfuehren (FILE=pfad fuer einzelne Datei)
+	$(DC) exec backend pytest $(FILE)
+
+# =============================================================================
+# Deploy + Tools
+# =============================================================================
+
+.PHONY: deploy
+deploy: # Pull latest production images and restart services
+	$(DC_PROD) pull
+	$(DC_PROD) up -d
+
+.PHONY: sync-makefile
+sync-makefile: # Shared Makefile von maisen-ci synchronisieren
+	curl -sL https://raw.githubusercontent.com/maisengasse-gmbh/maisen-ci/main/shared/Makefile.include -o .maisen.mk
+	@echo ".maisen.mk aktualisiert"
+
+.PHONY: sync-precommit
+sync-precommit: # Pre-commit Config von maisen-ci synchronisieren
+	curl -sL https://raw.githubusercontent.com/maisengasse-gmbh/maisen-ci/main/shared/.pre-commit-config.yaml -o .pre-commit-config.yaml
+
+.PHONY: sync-skills
+sync-skills: # Claude Code Plugins installieren/aktualisieren
+	@echo "Syncing maisen-skills marketplace..."
+	@claude plugins marketplace add maisengasse-gmbh/maisen-skills 2>&1 | tail -1
+	@claude plugins marketplace update maisen-skills 2>&1 | tail -1
+	@echo "Installing and updating plugins from .claude/settings.json..."
+	@python3 -c "import json; data=json.load(open('.claude/settings.json')); [print(p) for p in data.get('enabledPlugins',{}) if data['enabledPlugins'][p]]" | while read plugin; do \
+		claude plugins install "$$plugin" 2>&1 | tail -1; \
+		claude plugins update "$$plugin" 2>&1 | tail -1; \
+	done
+	@echo "Copying skills to .claude/skills/ and .cursor/skills/..."
+	@mkdir -p .claude/skills .cursor/skills
+	@find $(HOME)/.claude/plugins/cache/maisen-skills -path "*/skills/*/SKILL.md" | while read f; do \
+		name=$$(basename $$(dirname "$$f")); \
+		cp "$$f" ".claude/skills/$$name.md"; \
+		cp "$$f" ".cursor/skills/$$name.md"; \
+		echo "  $$name.md"; \
+	done
+	@echo "Alle Plugins synchronisiert (Claude Code + Cursor)."
+
+.PHONY: setup
+setup: build up migrate # Ersteinrichtung (build + up + migrate)
