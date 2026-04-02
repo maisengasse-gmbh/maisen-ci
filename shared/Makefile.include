@@ -6,11 +6,14 @@
 # Voraussetzung: Das Projekt-Makefile definiert diese Variablen VOR dem include:
 #   -include .env
 #   DC_BASE, DC, DC_PROD
-#   OP_DEV_ID (1Password Environment ID)
+#
+# 1Password Konfiguration kommt aus .env.op (gitignored):
+#   OP_DEV_ID=<Environment-ID>
+#   OP_SERVICE_ACCOUNT_TOKEN=<Token>
 # =============================================================================
 
-# 1Password Helper
-OP_TOKEN = $$(grep OP_SERVICE_ACCOUNT_TOKEN .env.op | cut -d= -f2)
+# 1Password: .env.op einlesen (OP_DEV_ID + OP_SERVICE_ACCOUNT_TOKEN)
+-include .env.op
 
 # =============================================================================
 # Hilfe
@@ -26,9 +29,9 @@ help: # Verfuegbare Befehle anzeigen
 
 .PHONY: env
 env: # .env aus 1Password generieren (mit Fallback auf bestehende .env)
-	@if command -v op >/dev/null 2>&1 && test -f .env.op && grep -qv 'HIER_TOKEN' .env.op 2>/dev/null; then \
+	@if command -v op >/dev/null 2>&1 && test -f .env.op && [ -n "$(OP_SERVICE_ACCOUNT_TOKEN)" ] && [ -n "$(OP_DEV_ID)" ]; then \
 		if [ ! -f .env ] || [ .env.op -nt .env ]; then \
-			export OP_SERVICE_ACCOUNT_TOKEN=$(OP_TOKEN) && \
+			export OP_SERVICE_ACCOUNT_TOKEN=$(OP_SERVICE_ACCOUNT_TOKEN) && \
 			op environment read $(OP_DEV_ID) > /tmp/.env.new 2>/dev/null && \
 			if [ -s /tmp/.env.new ] && ! grep -q '^\[ERROR\]' /tmp/.env.new; then \
 				mv /tmp/.env.new .env; \
@@ -148,24 +151,40 @@ sync-makefile: # Shared Makefile von maisen-ci synchronisieren
 sync-precommit: # Pre-commit Config von maisen-ci synchronisieren
 	curl -sL https://raw.githubusercontent.com/maisengasse-gmbh/maisen-ci/main/shared/.pre-commit-config.yaml -o .pre-commit-config.yaml
 
+# Konfigurierbar im Projekt-Makefile VOR dem include:
+#   CLAUDE_PLUGINS = superpowers commit-commands   (nur bestimmte Plugins)
+#   REPO_ROOT = ..                                  (wenn Makefile nicht im Repo-Root liegt)
+CLAUDE_PLUGINS ?= maisen-skills superpowers commit-commands pyright-lsp frontend-design ui-ux-pro-max
+REPO_ROOT ?= .
+
 .PHONY: sync-skills
 sync-skills: # Claude Code Plugins installieren/aktualisieren
 	@echo "Syncing maisen-skills marketplace..."
 	@claude plugins marketplace add maisengasse-gmbh/maisen-skills 2>&1 | tail -1
 	@claude plugins marketplace update maisen-skills 2>&1 | tail -1
-	@echo "Installing and updating plugins from .claude/settings.json..."
-	@python3 -c "import json; data=json.load(open('.claude/settings.json')); [print(p) for p in data.get('enabledPlugins',{}) if data['enabledPlugins'][p]]" | while read plugin; do \
+	@echo "Generating $(REPO_ROOT)/.claude/settings.json..."
+	@mkdir -p $(REPO_ROOT)/.claude
+	@python3 -c "import json; plugins={p+'@maisen-skills':True for p in '$(CLAUDE_PLUGINS)'.split()}; json.dump({'enabledPlugins':plugins},open('$(REPO_ROOT)/.claude/settings.json','w'),indent=4)"
+	@echo "Installing and updating plugins..."
+	@for plugin in $(CLAUDE_PLUGINS); do \
 		claude plugins install "$$plugin" 2>&1 | tail -1; \
 		claude plugins update "$$plugin" 2>&1 | tail -1; \
 	done
-	@echo "Copying skills to .claude/skills/ and .cursor/skills/..."
-	@mkdir -p .claude/skills .cursor/skills
+	@echo "Copying skills to $(REPO_ROOT)/.claude/skills/ and $(REPO_ROOT)/.cursor/rules/..."
+	@mkdir -p $(REPO_ROOT)/.claude/skills $(REPO_ROOT)/.cursor/rules
 	@find $(HOME)/.claude/plugins/cache/maisen-skills -path "*/skills/*/SKILL.md" | while read f; do \
 		name=$$(basename $$(dirname "$$f")); \
-		cp "$$f" ".claude/skills/$$name.md"; \
-		cp "$$f" ".cursor/skills/$$name.md"; \
-		echo "  $$name.md"; \
+		cp "$$f" "$(REPO_ROOT)/.claude/skills/$$name.md"; \
+		cp "$$f" "$(REPO_ROOT)/.cursor/rules/$$name.mdc"; \
+		echo "  $$name"; \
 	done
 	@echo "Alle Plugins synchronisiert (Claude Code + Cursor)."
 
-# setup ist projektspezifisch — im Projekt-Makefile definieren
+# Konfigurierbar im Projekt-Makefile VOR dem include:
+#   SETUP_EXTRA = copy-ssh-keys createsuperuser   (zusaetzliche Setup-Steps)
+SETUP_EXTRA ?=
+
+.PHONY: setup
+setup: # Ersteinrichtung (sync-makefile + build + up + migrate + extras)
+	@test -f .maisen.mk || $(MAKE) sync-makefile
+	$(MAKE) build up migrate $(SETUP_EXTRA)
