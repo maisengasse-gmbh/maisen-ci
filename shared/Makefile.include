@@ -9,7 +9,7 @@
 #
 # 1Password Konfiguration kommt aus .env.op (gitignored):
 #   OP_DEV_ID=<Environment-ID>
-#   OP_SERVICE_ACCOUNT_TOKEN=<Token>
+#   OP_SERVICE_ACCOUNT_TOKEN=<Token> (optional, wenn op bereits authentifiziert)
 # =============================================================================
 
 # 1Password: .env.op einlesen (OP_DEV_ID + OP_SERVICE_ACCOUNT_TOKEN)
@@ -29,9 +29,9 @@ help: # Verfuegbare Befehle anzeigen
 
 .PHONY: env
 env: # .env aus 1Password generieren (mit Fallback auf bestehende .env)
-	@if command -v op >/dev/null 2>&1 && test -f .env.op && [ -n "$(OP_SERVICE_ACCOUNT_TOKEN)" ] && [ -n "$(OP_DEV_ID)" ]; then \
-		export OP_SERVICE_ACCOUNT_TOKEN=$(OP_SERVICE_ACCOUNT_TOKEN) && \
-		op environment read $(OP_DEV_ID) > /tmp/.env.new 2>/dev/null && \
+	@if command -v op >/dev/null 2>&1 && test -f .env.op && [ -n "$(OP_DEV_ID)" ]; then \
+		if [ -n "$(OP_SERVICE_ACCOUNT_TOKEN)" ]; then export OP_SERVICE_ACCOUNT_TOKEN=$(OP_SERVICE_ACCOUNT_TOKEN); fi && \
+		op environment read $(OP_DEV_ID) > /tmp/.env.new 2>/dev/null; \
 		if [ -s /tmp/.env.new ] && ! grep -q '^\[ERROR\]' /tmp/.env.new; then \
 			mv /tmp/.env.new .env; \
 			echo ".env aus 1Password generiert"; \
