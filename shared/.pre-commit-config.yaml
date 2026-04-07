@@ -43,6 +43,7 @@ repos:
         language: pygrep
         entry: '\bdebugger\b'
         types_or: [ts, tsx, vue, javascript]
+        exclude: 'eslint\.config\.'
 
   - repo: https://github.com/commit-check/commit-check
     rev: v2.3.0
