@@ -30,6 +30,20 @@ repos:
       - id: check-shebang-scripts-are-executable
       - id: check-case-conflict
 
+  - repo: local
+    hooks:
+      - id: no-alert
+        name: check for alert()
+        language: pygrep
+        entry: '\balert\('
+        types_or: [ts, tsx, vue, javascript]
+
+      - id: no-debugger
+        name: check for debugger
+        language: pygrep
+        entry: '\bdebugger\b'
+        types_or: [ts, tsx, vue, javascript]
+
   - repo: https://github.com/commit-check/commit-check
     rev: v2.3.0
     hooks:
