@@ -109,22 +109,23 @@ jobs:
         with:
           python-version: ${{ inputs.python_version }}
 
-      - name: Cache pip
+      - name: Set up uv
+        uses: astral-sh/setup-uv@v6
+
+      - name: Cache uv
         uses: actions/cache@v4
         with:
-          path: ~/.cache/pip
-          key: pip-${{ inputs.python_version }}-${{ hashFiles(format('{0}/requirements.txt', inputs.working_directory)) }}
+          path: ~/.cache/uv
+          key: uv-${{ inputs.python_version }}-${{ hashFiles(format('{0}/requirements.txt', inputs.working_directory)) }}
           restore-keys: |
-            pip-${{ inputs.python_version }}-
+            uv-${{ inputs.python_version }}-
 
       - name: Install dependencies
         working-directory: ${{ inputs.working_directory }}
-        run: |
-          pip install --upgrade pip
-          ${{ inputs.pip_install_command || 'pip install -r requirements.txt' }}
+        run: ${{ inputs.pip_install_command || 'uv pip install --system -r requirements.txt' }}
 
       - name: Install Ruff
-        run: pip install ruff
+        run: uv pip install --system ruff
 
       - name: Ruff lint
         working-directory: ${{ inputs.working_directory }}
