@@ -30,17 +30,15 @@ help: # Verfuegbare Befehle anzeigen
 .PHONY: env
 env: # .env aus 1Password generieren (mit Fallback auf bestehende .env)
 	@if command -v op >/dev/null 2>&1 && test -f .env.op && [ -n "$(OP_SERVICE_ACCOUNT_TOKEN)" ] && [ -n "$(OP_DEV_ID)" ]; then \
-		if [ ! -f .env ] || [ .env.op -nt .env ]; then \
-			export OP_SERVICE_ACCOUNT_TOKEN=$(OP_SERVICE_ACCOUNT_TOKEN) && \
-			op environment read $(OP_DEV_ID) > /tmp/.env.new 2>/dev/null && \
-			if [ -s /tmp/.env.new ] && ! grep -q '^\[ERROR\]' /tmp/.env.new; then \
-				mv /tmp/.env.new .env; \
-				echo ".env aus 1Password generiert"; \
-			else \
-				rm -f /tmp/.env.new; \
-				if [ -f .env ]; then echo "⚠ 1Password nicht erreichbar, bestehende .env wird verwendet"; \
-				else echo "Error: 1Password nicht erreichbar und keine .env vorhanden."; exit 1; fi; \
-			fi; \
+		export OP_SERVICE_ACCOUNT_TOKEN=$(OP_SERVICE_ACCOUNT_TOKEN) && \
+		op environment read $(OP_DEV_ID) > /tmp/.env.new 2>/dev/null && \
+		if [ -s /tmp/.env.new ] && ! grep -q '^\[ERROR\]' /tmp/.env.new; then \
+			mv /tmp/.env.new .env; \
+			echo ".env aus 1Password generiert"; \
+		else \
+			rm -f /tmp/.env.new; \
+			if [ -f .env ]; then echo "⚠ 1Password nicht erreichbar, bestehende .env wird verwendet"; \
+			else echo "Error: 1Password nicht erreichbar und keine .env vorhanden."; exit 1; fi; \
 		fi; \
 	elif [ ! -f .env ]; then \
 		echo "Error: Keine .env vorhanden."; \
