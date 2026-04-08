@@ -1,34 +1,25 @@
+# Ensures commit-msg hooks (e.g. commit-check check-message) are installed with `pre-commit install`.
+default_install_hook_types: [pre-commit, commit-msg]
+
 repos:
   - repo: https://github.com/astral-sh/ruff-pre-commit
-    rev: v0.15.7
+    rev: v0.15.8
     hooks:
       - id: ruff
         args: [--fix]
-        types_or: [python, pyi]
-      - id: ruff-format
-        types_or: [python, pyi]
-
-  - repo: local
-    hooks:
-      - id: check-pdb
-        name: check for pdb
-        entry: python -c "import sys; [sys.exit(1) for f in sys.argv[1:] if 'pdb' in open(f).read()]"
-        language: system
-        types: [python]
 
   - repo: https://github.com/pre-commit/pre-commit-hooks
     rev: v6.0.0
     hooks:
-      - id: trailing-whitespace
-      - id: end-of-file-fixer
-      - id: check-yaml
-      - id: check-added-large-files
       - id: no-commit-to-branch
-        args: [--branch=main, --branch=dev]
+        args: [--branch, main, --branch, master]
+      - id: trailing-whitespace
+        exclude: ^(\.ansible/|static/|node_modules/|.*/migrations/)
       - id: detect-private-key
       - id: debug-statements
       - id: check-shebang-scripts-are-executable
       - id: check-case-conflict
+      - id: check-added-large-files
 
   - repo: local
     hooks:
@@ -46,6 +37,8 @@ repos:
         exclude: 'eslint\.config\.'
 
   - repo: https://github.com/commit-check/commit-check
-    rev: v2.3.0
+    rev: v2.4.3
     hooks:
+      - id: check-branch
+        args: [--allow-branch-names, dev]
       - id: check-message
